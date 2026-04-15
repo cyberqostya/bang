@@ -2,10 +2,10 @@
 import { computed, ref } from "vue";
 
 const fallbackRoom = {
-  id: "main",
-  name: "Салун",
+  id: "",
+  name: "",
   status: "lobby",
-  hostClientId: null,
+  hostPlayerId: null,
   seats: Array.from({ length: 8 }, (_, index) => ({
     index,
     player: null,
@@ -14,13 +14,13 @@ const fallbackRoom = {
 
 export const useRoomStore = defineStore("room", () => {
   const screen = ref("rooms");
-  const clientId = ref("");
+  const playerId = ref(getStoredPlayerId());
   const connectionStatus = ref("idle");
   const error = ref("");
   const room = ref(fallbackRoom);
+  const rooms = ref([]);
   const socket = ref(null);
 
-  const rooms = computed(() => [room.value]);
   const players = computed(() => (
     room.value.seats
       .filter((seat) => seat.player)
@@ -29,10 +29,12 @@ export const useRoomStore = defineStore("room", () => {
         ...seat.player,
       }))
   ));
+  const ownPlayer = computed(() => players.value.find((player) => player.playerId === playerId.value) || null);
   const isConnected = computed(() => connectionStatus.value === "connected");
-  const isHost = computed(() => Boolean(clientId.value) && room.value.hostClientId === clientId.value);
-  const isSeated = computed(() => room.value.seats.some((seat) => seat.player?.clientId === clientId.value));
-  const canStartGame = computed(() => isHost.value && players.value.length > 1);
+  const hasRoom = computed(() => Boolean(room.value.id));
+  const isHost = computed(() => Boolean(playerId.value) && room.value.hostPlayerId === playerId.value);
+  const isSeated = computed(() => Boolean(ownPlayer.value));
+  const canStartGame = computed(() => isHost.value && isSeated.value && players.value.length > 1);
   const wsUrl = computed(() => getWebSocketUrl());
 
   function connect() {
@@ -44,6 +46,7 @@ export const useRoomStore = defineStore("room", () => {
     socket.value.addEventListener("open", () => {
       connectionStatus.value = "connected";
       error.value = "";
+      send("client:hello", { playerId: playerId.value });
     });
 
     socket.value.addEventListener("message", (event) => {
@@ -65,25 +68,18 @@ export const useRoomStore = defineStore("room", () => {
     });
   }
 
-  function openRoom(roomId) {
-    if (roomId !== room.value.id) return;
+  function createRoom(name, password) {
+    send("room:create", { name, password });
+  }
 
-    if (!isConnected.value) {
-      error.value = "Нет соединения с сервером";
-      return;
-    }
+  function joinRoom(roomId, password) {
+    send("room:join", { roomId, password });
+  }
 
-    if (room.value.status === "game") {
-      if (isSeated.value) {
-        screen.value = "game";
-        return;
-      }
+  function openOwnRoom() {
+    if (!hasRoom.value) return;
 
-      error.value = "Игра уже идет";
-      return;
-    }
-
-    screen.value = "seats";
+    syncScreenWithRoom();
   }
 
   function takeSeat(seatIndex, name) {
@@ -96,7 +92,7 @@ export const useRoomStore = defineStore("room", () => {
 
   function startGame() {
     if (!canStartGame.value) {
-      error.value = "Нужно минимум два игрока за столом";
+      error.value = isSeated.value ? "Нужно минимум два игрока за столом" : "Сначала займите место за столом";
       return;
     }
 
@@ -105,31 +101,32 @@ export const useRoomStore = defineStore("room", () => {
 
   function handleMessage(message) {
     if (message.type === "client:init") {
-      clientId.value = message.payload.clientId;
-      room.value = message.payload.room;
-
-      if (room.value.status === "game") {
-        screen.value = isSeated.value ? "game" : "rooms";
-
-        if (!isSeated.value) {
-          error.value = "Игра началась без вас";
-        }
-      }
+      playerId.value = message.payload.playerId;
+      storePlayerId(playerId.value);
+      rooms.value = message.payload.rooms || [];
+      room.value = message.payload.room || fallbackRoom;
+      syncScreenWithRoom();
 
       return;
     }
 
+    if (message.type === "rooms:update") {
+      rooms.value = message.payload.rooms || [];
+      return;
+    }
+
     if (message.type === "room:update") {
-      room.value = message.payload.room;
+      room.value = message.payload.room || fallbackRoom;
+      error.value = "";
+      syncScreenWithRoom();
 
-      if (room.value.status === "game") {
-        screen.value = isSeated.value ? "game" : "rooms";
+      return;
+    }
 
-        if (!isSeated.value) {
-          error.value = "Игра началась без вас";
-        }
-      }
-
+    if (message.type === "room:closed") {
+      room.value = fallbackRoom;
+      screen.value = "rooms";
+      error.value = "Комната закрыта";
       return;
     }
 
@@ -147,26 +144,75 @@ export const useRoomStore = defineStore("room", () => {
     socket.value.send(JSON.stringify({ type, payload }));
   }
 
+  function syncScreenWithRoom() {
+    if (!hasRoom.value) {
+      screen.value = "rooms";
+      return;
+    }
+
+    if (room.value.status === "game") {
+      screen.value = isSeated.value ? "game" : "rooms";
+
+      if (!isSeated.value) {
+        error.value = "Игра началась без вас";
+      }
+
+      return;
+    }
+
+    screen.value = "seats";
+  }
+
   return {
-    clientId,
     canStartGame,
     connectionStatus,
     error,
+    hasRoom,
     isConnected,
     isHost,
     isSeated,
+    ownPlayer,
+    playerId,
     players,
     room,
     rooms,
     screen,
     wsUrl,
     connect,
+    createRoom,
+    joinRoom,
     leaveSeat,
-    openRoom,
+    openOwnRoom,
     startGame,
     takeSeat,
   };
 });
+
+function getStoredPlayerId() {
+  const storedPlayerId = window.localStorage.getItem("bangPlayerId");
+
+  if (storedPlayerId) {
+    return storedPlayerId;
+  }
+
+  const playerId = createPlayerId();
+
+  storePlayerId(playerId);
+
+  return playerId;
+}
+
+function storePlayerId(playerId) {
+  window.localStorage.setItem("bangPlayerId", playerId);
+}
+
+function createPlayerId() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `player-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function getWebSocketUrl() {
   if (import.meta.env.VITE_WS_URL) {

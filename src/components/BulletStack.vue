@@ -1,19 +1,34 @@
 ﻿<script setup>
+import { computed } from "vue";
 import { healthConfig } from "../config/healthConfig.js";
-import { useHealthStore } from "../stores/healthStore.js";
+import { useRoomStore } from "../stores/roomStore.js";
 
-const healthStore = useHealthStore();
-const bulletImage = pickRandom(healthConfig.bulletImages);
+const roomStore = useRoomStore();
 
-function pickRandom(items) {
-  return items[Math.floor(Math.random() * items.length)];
+const fallbackPlayer = {
+  health: healthConfig.maxHealth,
+  maxHealth: healthConfig.maxHealth,
+  bulletSkinIndex: 0,
+};
+
+const ownPlayer = computed(() => roomStore.ownPlayer || fallbackPlayer);
+const bulletImage = computed(() => getBulletImage(ownPlayer.value.bulletSkinIndex));
+const bullets = computed(() => (
+  Array.from({ length: ownPlayer.value.maxHealth }, (_, index) => ({
+    id: index,
+    isLoaded: index < ownPlayer.value.health,
+  }))
+));
+
+function getBulletImage(index) {
+  return healthConfig.bulletImages[index] || healthConfig.bulletImages[0];
 }
 </script>
 
 <template>
   <div class="bullets" aria-label="Патроны">
     <div
-      v-for="bullet in healthStore.bullets"
+      v-for="bullet in bullets"
       :key="bullet.id"
       class="bullet"
       :class="{

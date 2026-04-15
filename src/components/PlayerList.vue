@@ -4,18 +4,21 @@ import { healthConfig } from "../config/healthConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
-const playerBulletImage = healthConfig.bulletImages[0];
 
 const players = computed(() =>
   roomStore.players
-    .filter((player) => player.clientId !== roomStore.clientId)
+    .filter((player) => player.playerId !== roomStore.playerId)
     .map((player) => ({
-      id: player.clientId,
+      id: player.playerId,
       name: player.name,
       health: player.health,
-      bulletImage: playerBulletImage,
+      bulletImage: getBulletImage(player.bulletSkinIndex),
     })),
 );
+
+function getBulletImage(index) {
+  return healthConfig.bulletImages[index] || healthConfig.bulletImages[0];
+}
 </script>
 
 <template>

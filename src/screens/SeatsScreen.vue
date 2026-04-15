@@ -20,7 +20,7 @@ function handleSeatClick(seat) {
 }
 
 function isOwnSeat(seat) {
-  return seat.player?.clientId === roomStore.clientId;
+  return seat.player?.playerId === roomStore.playerId;
 }
 
 async function openNameDialog(seatIndex) {
