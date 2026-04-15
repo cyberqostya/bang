@@ -1,16 +1,19 @@
 ﻿<script setup>
-import PlayZone from "./components/PlayZone.vue";
-import BottomPanel from "./components/BottomPanel.vue";
-import BulletStack from "./components/BulletStack.vue";
-import PlayerList from "./components/PlayerList.vue";
+import { onMounted } from "vue";
+import GameScreen from "./screens/GameScreen.vue";
+import RoomsScreen from "./screens/RoomsScreen.vue";
+import SeatsScreen from "./screens/SeatsScreen.vue";
+import { useRoomStore } from "./stores/roomStore.js";
+
+const roomStore = useRoomStore();
+
+onMounted(() => {
+  roomStore.connect();
+});
 </script>
 
 <template>
-  <main class="app">
-    <PlayerList />
-    <PlayZone title="Стол">
-      <BulletStack />
-    </PlayZone>
-    <BottomPanel />
-  </main>
+  <RoomsScreen v-if="roomStore.screen === 'rooms'" />
+  <SeatsScreen v-else-if="roomStore.screen === 'seats'" />
+  <GameScreen v-else />
 </template>

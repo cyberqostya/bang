@@ -1,19 +1,20 @@
 ﻿<script setup>
 import { computed } from "vue";
 import { healthConfig } from "../config/healthConfig.js";
-import { useHealthStore } from "../stores/healthStore.js";
+import { useRoomStore } from "../stores/roomStore.js";
 
-const healthStore = useHealthStore();
-const playerCount = 4;
+const roomStore = useRoomStore();
 const playerBulletImage = healthConfig.bulletImages[0];
 
 const players = computed(() =>
-  Array.from({ length: playerCount }, (_, index) => ({
-    id: index + 1,
-    name: `player ${index + 1}`,
-    health: index === 0 ? healthStore.health : healthStore.maxHealth,
-    bulletImage: playerBulletImage,
-  })),
+  roomStore.players
+    .filter((player) => player.clientId !== roomStore.clientId)
+    .map((player) => ({
+      id: player.clientId,
+      name: player.name,
+      health: player.health,
+      bulletImage: playerBulletImage,
+    })),
 );
 </script>
 
@@ -48,11 +49,14 @@ const players = computed(() =>
   min-height: 38px;
   border: 1px dashed var(--line);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 5px 5px 5px 8px;
   background: var(--back-soft);
 }
 
 .player-card__name {
+  display: flex;
+  align-items: center;
+  height: 100%;
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
@@ -72,9 +76,9 @@ const players = computed(() =>
 }
 
 .player-card__health img {
-  width: 12px;
-  height: 19px;
-  margin-left: -3px;
+  width: 16px;
+  height: auto;
+  margin-left: -11px;
   object-fit: contain;
 }
 

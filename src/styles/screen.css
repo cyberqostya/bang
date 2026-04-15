@@ -5,6 +5,7 @@
 }
 
 :root {
+  --font-main: "Heffer";
   --back: #ebe5d0;
   --back-soft: #f3f1db;
   --ink: #1d1d1d;
@@ -33,21 +34,51 @@ body,
   overscroll-behavior: none;
   background: var(--back);
   color: var(--ink);
-  font-family: "Heffer", Arial, Helvetica, sans-serif;
+  font-family: var(--font-main);
+}
+
+span,
+button,
+input,
+textarea,
+select,
+label,
+small {
+  font-family: var(--font-main);
+  letter-spacing: 0;
+}
+
+span {
+  line-height: 1;
 }
 
 button {
-  display: block;
+  display: grid;
+  place-items: center;
   border: 0;
   border-radius: 6px;
   padding: 0;
   background: none;
   color: inherit;
-  font: inherit;
+  font-family: var(--font-main);
+  font-size: inherit;
+  font-weight: inherit;
   line-height: 1;
   cursor: pointer;
   touch-action: manipulation;
+  appearance: none;
+  -webkit-appearance: none;
   -webkit-tap-highlight-color: rgba(94, 84, 70, 0.3);
+}
+
+input {
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 6px;
+  font-family: var(--font-main);
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: normal;
 }
 
 button:active {
