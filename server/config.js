@@ -2,7 +2,7 @@
   port: Number(process.env.PORT || 3001),
   seatCount: 8,
   defaultHealth: 4,
-  bulletSkinCount: 11,
+  bulletSkinCount: 10,
   maxRoomNameLength: 15,
   maxPasswordLength: 40,
   maxActiveRooms: 100,

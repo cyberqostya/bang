@@ -12,7 +12,11 @@ defineProps({
 </script>
 
 <template>
-  <section class="play-zone" :class="variant && `play-zone_${variant}`" :aria-label="title">
+  <section
+    class="play-zone"
+    :class="variant && `play-zone_${variant}`"
+    :aria-label="title"
+  >
     <span class="play-zone__title">{{ title }}</span>
     <div class="play-zone__content">
       <slot />
@@ -23,6 +27,8 @@ defineProps({
 <style scoped>
 .play-zone {
   position: relative;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   border: 1px dashed var(--line);
   border-radius: 6px;
@@ -45,17 +51,28 @@ defineProps({
 
 .play-zone__content {
   width: 100%;
+  min-width: 0;
   height: 100%;
   min-height: 0;
-  padding: var(--zone-padding);
+  padding: 10px;
 }
 
 .play-zone_hand {
-  min-height: 112px;
+  min-height: 132px;
 }
 
 .play-zone_hand .play-zone__content {
   display: flex;
   align-items: center;
+  overflow: hidden;
+  padding: 0;
+}
+
+.play-zone_table .play-zone__content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  overflow: visible;
 }
 </style>

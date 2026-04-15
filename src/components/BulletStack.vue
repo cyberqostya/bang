@@ -1,9 +1,13 @@
 ﻿<script setup>
-import { computed } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { healthConfig } from "../config/healthConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
+const bulletsElement = ref(null);
+const bulletWidth = ref(0);
+const containerWidth = ref(0);
+let resizeObserver = null;
 
 const fallbackPlayer = {
   health: healthConfig.maxHealth,
@@ -19,14 +23,74 @@ const bullets = computed(() => (
     isLoaded: index < ownPlayer.value.health,
   }))
 ));
+const bulletOverlap = computed(() => {
+  const count = bullets.value.length;
+
+  if (count <= 1 || !bulletWidth.value || !containerWidth.value) {
+    return "0px";
+  }
+
+  const naturalWidth = bulletWidth.value * count;
+
+  if (naturalWidth <= containerWidth.value) {
+    return "0px";
+  }
+
+  return `${(containerWidth.value - naturalWidth) / (count - 1)}px`;
+});
+const bulletsStyle = computed(() => ({
+  "--bullet-overlap": bulletOverlap.value,
+}));
+
+onMounted(() => {
+  resizeObserver = new ResizeObserver(updateBulletMetrics);
+
+  if (bulletsElement.value) {
+    resizeObserver.observe(bulletsElement.value);
+  }
+
+  updateBulletMetrics();
+});
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+});
+
+watch(
+  () => bullets.value.length,
+  () => {
+    updateBulletMetrics();
+  },
+);
 
 function getBulletImage(index) {
+  if (ownPlayer.value.bulletSkinKey === "sheriff") {
+    return healthConfig.sheriffBulletImage;
+  }
+
   return healthConfig.bulletImages[index] || healthConfig.bulletImages[0];
+}
+
+async function updateBulletMetrics() {
+  await nextTick();
+
+  const element = bulletsElement.value;
+  const bullet = element?.querySelector(".bullet");
+
+  if (!element || !bullet) return;
+
+  containerWidth.value = element.clientWidth;
+  bulletWidth.value = bullet.getBoundingClientRect().width;
 }
 </script>
 
 <template>
-  <div class="bullets" aria-label="Патроны">
+  <div
+    ref="bulletsElement"
+    class="bullets"
+    :style="bulletsStyle"
+    aria-label="Патроны"
+  >
     <div
       v-for="bullet in bullets"
       :key="bullet.id"
@@ -44,21 +108,23 @@ function getBulletImage(index) {
 
 <style scoped>
 .bullets {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  height: var(--bullet-height);
+  width: 50%;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .bullet {
   display: grid;
   place-items: center;
-  flex: 0 0 auto;
-  width: 51px;
-  height: var(--bullet-height);
+  flex-shrink: 0;
+  width: var(--card-width);
   background: transparent;
+}
+
+.bullet + .bullet {
+  margin-left: var(--bullet-overlap);
 }
 
 .bullet img {

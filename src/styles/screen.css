@@ -14,8 +14,8 @@
   --gold: #f0a020;
   --red: #c94a35;
   --ratio: 1.618;
-  --bullet-height: 82px;
-  --zone-padding: 18px;
+  --card-width: 72px;
+  --bullet-height: calc(var(--card-width) * var(--ratio));
 }
 
 * {
@@ -105,6 +105,11 @@ img {
   width: min(100%, 600px);
   height: 100dvh;
   margin-inline: auto;
+  overflow: hidden;
   padding: 5px;
   background: var(--back);
+}
+
+.app > * {
+  min-width: 0;
 }

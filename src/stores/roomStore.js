@@ -1,5 +1,6 @@
 ﻿import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { cardConfig } from "../config/cardConfig.js";
 
 const fallbackRoom = {
   id: "",
@@ -19,6 +20,7 @@ export const useRoomStore = defineStore("room", () => {
   const error = ref("");
   const room = ref(fallbackRoom);
   const rooms = ref([]);
+  const selectedCardId = ref("");
   const socket = ref(null);
 
   const players = computed(() => (
@@ -35,6 +37,7 @@ export const useRoomStore = defineStore("room", () => {
   const isHost = computed(() => Boolean(playerId.value) && room.value.hostPlayerId === playerId.value);
   const isSeated = computed(() => Boolean(ownPlayer.value));
   const canStartGame = computed(() => isHost.value && isSeated.value && players.value.length > 1);
+  const selectedCard = computed(() => cardConfig[selectedCardId.value] || null);
   const wsUrl = computed(() => getWebSocketUrl());
 
   function connect() {
@@ -98,6 +101,25 @@ export const useRoomStore = defineStore("room", () => {
     send("room:close");
   }
 
+  function selectCard(cardId) {
+    selectedCardId.value = selectedCardId.value === cardId ? "" : cardId;
+  }
+
+  function cancelSelectedCard() {
+    selectedCardId.value = "";
+  }
+
+  function useSelectedCard(targetPlayerId) {
+    if (!selectedCard.value) return;
+
+    send("game:action", {
+      action: selectedCard.value.action,
+      cardId: selectedCard.value.id,
+      targetPlayerId,
+    });
+    cancelSelectedCard();
+  }
+
   function startGame() {
     if (!canStartGame.value) {
       error.value = isSeated.value ? "Нужно минимум два игрока за столом" : "Сначала займите место за столом";
@@ -135,6 +157,7 @@ export const useRoomStore = defineStore("room", () => {
       room.value = fallbackRoom;
       screen.value = "rooms";
       error.value = "Комната закрыта";
+      cancelSelectedCard();
       return;
     }
 
@@ -143,6 +166,7 @@ export const useRoomStore = defineStore("room", () => {
       rooms.value = message.payload.rooms || rooms.value;
       screen.value = "rooms";
       error.value = "";
+      cancelSelectedCard();
       return;
     }
 
@@ -166,7 +190,7 @@ export const useRoomStore = defineStore("room", () => {
       return;
     }
 
-    if (room.value.status === "game") {
+    if (room.value.status === "game" || room.value.status === "finished") {
       screen.value = isSeated.value ? "game" : "rooms";
 
       if (!isSeated.value) {
@@ -192,8 +216,11 @@ export const useRoomStore = defineStore("room", () => {
     players,
     room,
     rooms,
+    selectedCard,
+    selectedCardId,
     screen,
     wsUrl,
+    cancelSelectedCard,
     closeRoom,
     connect,
     createRoom,
@@ -201,8 +228,10 @@ export const useRoomStore = defineStore("room", () => {
     leaveRoom,
     leaveSeat,
     openOwnRoom,
+    selectCard,
     startGame,
     takeSeat,
+    useSelectedCard,
   };
 });
 
