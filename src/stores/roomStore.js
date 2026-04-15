@@ -90,6 +90,14 @@ export const useRoomStore = defineStore("room", () => {
     send("room:leave-seat");
   }
 
+  function leaveRoom() {
+    send("room:leave-room");
+  }
+
+  function closeRoom() {
+    send("room:close");
+  }
+
   function startGame() {
     if (!canStartGame.value) {
       error.value = isSeated.value ? "Нужно минимум два игрока за столом" : "Сначала займите место за столом";
@@ -127,6 +135,14 @@ export const useRoomStore = defineStore("room", () => {
       room.value = fallbackRoom;
       screen.value = "rooms";
       error.value = "Комната закрыта";
+      return;
+    }
+
+    if (message.type === "room:left") {
+      room.value = fallbackRoom;
+      rooms.value = message.payload.rooms || rooms.value;
+      screen.value = "rooms";
+      error.value = "";
       return;
     }
 
@@ -178,9 +194,11 @@ export const useRoomStore = defineStore("room", () => {
     rooms,
     screen,
     wsUrl,
+    closeRoom,
     connect,
     createRoom,
     joinRoom,
+    leaveRoom,
     leaveSeat,
     openOwnRoom,
     startGame,

@@ -74,15 +74,34 @@ function submitName() {
       </button>
     </section>
 
-    <button
-      v-if="roomStore.isHost"
-      class="start-button"
-      type="button"
-      :disabled="!roomStore.canStartGame"
-      @click="roomStore.startGame"
-    >
-      Начать игру
-    </button>
+    <div class="room-actions">
+      <button
+        v-if="roomStore.isHost"
+        class="start-button"
+        type="button"
+        :disabled="!roomStore.canStartGame"
+        @click="roomStore.startGame"
+      >
+        Начать игру
+      </button>
+      <button
+        v-if="roomStore.isHost"
+        class="close-room-button"
+        type="button"
+        @click="roomStore.closeRoom"
+      >
+        Закрыть
+      </button>
+      <button
+        v-else
+        class="leave-room-button"
+        type="button"
+        :disabled="roomStore.isSeated"
+        @click="roomStore.leaveRoom"
+      >
+        Выйти из комнаты
+      </button>
+    </div>
 
     <p v-if="roomStore.error" class="screen-error">{{ roomStore.error }}</p>
 
@@ -297,17 +316,40 @@ function submitName() {
   left: 8%;
 }
 
-.start-button {
+.room-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.room-actions button {
   min-height: 54px;
   border: 1px dashed var(--line);
   border-radius: 6px;
+  font-size: 24px;
+}
+
+.start-button {
   background: var(--gold);
   color: var(--ink);
-  font-size: 24px;
 }
 
 .start-button:disabled {
   opacity: 0.52;
+}
+
+.leave-room-button:disabled {
+  opacity: 0.52;
+}
+
+.close-room-button,
+.leave-room-button {
+  background: rgba(94, 84, 70, 0.16);
+  color: var(--muted);
+}
+
+.leave-room-button {
+  grid-column: 1 / -1;
 }
 
 .screen-error {
