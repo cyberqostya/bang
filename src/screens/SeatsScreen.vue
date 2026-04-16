@@ -1,5 +1,6 @@
 ﻿<script setup>
 import { nextTick, ref } from "vue";
+import AppHeader from "../components/AppHeader.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
@@ -7,6 +8,7 @@ const nameInput = ref(null);
 const selectedSeatIndex = ref(null);
 const playerName = ref("");
 const isNameDialogOpen = ref(false);
+const isCloseRoomDialogOpen = ref(false);
 
 function handleSeatClick(seat) {
   if (isOwnSeat(seat)) {
@@ -46,10 +48,57 @@ function submitName() {
   roomStore.takeSeat(selectedSeatIndex.value, name);
   closeNameDialog();
 }
+
+function openCloseRoomDialog() {
+  isCloseRoomDialogOpen.value = true;
+}
+
+function closeCloseRoomDialog() {
+  isCloseRoomDialogOpen.value = false;
+}
+
+function confirmCloseRoom() {
+  roomStore.closeRoom();
+  closeCloseRoomDialog();
+}
 </script>
 
 <template>
   <main class="seats-screen">
+    <AppHeader>
+      <template #left>
+        <button
+          v-if="roomStore.isHost"
+          class="header-button header-button_muted"
+          type="button"
+          :disabled="roomStore.isSeated"
+          @click="openCloseRoomDialog"
+        >
+          Закрыть комнату
+        </button>
+        <button
+          v-else
+          class="header-button header-button_muted"
+          type="button"
+          :disabled="roomStore.isSeated"
+          @click="roomStore.leaveRoom"
+        >
+          Выйти
+        </button>
+      </template>
+      <template #right>
+        <button
+          v-if="roomStore.isHost"
+          class="header-button"
+          type="button"
+          :disabled="!roomStore.canStartGame"
+          @click="roomStore.startGame"
+        >
+          Начать
+        </button>
+      </template>
+    </AppHeader>
+
     <section class="seat-table" aria-label="Выбор места">
       <div class="seat-table__oval">
         <span>Рассаживайтесь,<br />игроки</span>
@@ -70,38 +119,16 @@ function submitName() {
         :disabled="Boolean(seat.player) && !isOwnSeat(seat)"
         @click="handleSeatClick(seat)"
       >
-        <span v-if="seat.player">{{ seat.player.name }}</span>
+        <span v-if="seat.player" class="seat__name">{{
+          seat.player.name
+        }}</span>
+        <span
+          v-if="isOwnSeat(seat)"
+          class="seat__remove"
+          aria-hidden="true"
+        ></span>
       </button>
     </section>
-
-    <div class="room-actions">
-      <button
-        v-if="roomStore.isHost"
-        class="close-room-button"
-        type="button"
-        @click="roomStore.closeRoom"
-      >
-        Закрыть
-      </button>
-      <button
-        v-if="roomStore.isHost"
-        class="start-button"
-        type="button"
-        :disabled="!roomStore.canStartGame"
-        @click="roomStore.startGame"
-      >
-        Начать игру
-      </button>
-      <button
-        v-else
-        class="leave-room-button"
-        type="button"
-        :disabled="roomStore.isSeated"
-        @click="roomStore.leaveRoom"
-      >
-        Выйти из комнаты
-      </button>
-    </div>
 
     <p v-if="roomStore.error" class="screen-error">{{ roomStore.error }}</p>
 
@@ -144,6 +171,30 @@ function submitName() {
         </div>
       </form>
     </div>
+
+    <div
+      v-if="isCloseRoomDialogOpen"
+      class="close-room-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Закрыть комнату"
+    >
+      <form class="close-room-dialog__form" @submit.prevent="confirmCloseRoom">
+        <p>Вы действительно хотите закрыть комнату?</p>
+        <div class="close-room-dialog__actions">
+          <button
+            class="close-room-dialog__cancel"
+            type="button"
+            @click="closeCloseRoomDialog"
+          >
+            <span>Нет</span>
+          </button>
+          <button class="close-room-dialog__submit" type="submit">
+            <span>Да</span>
+          </button>
+        </div>
+      </form>
+    </div>
   </main>
 </template>
 
@@ -152,18 +203,38 @@ function submitName() {
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
-  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
   width: min(100%, 600px);
   height: 100dvh;
   margin-inline: auto;
-  padding: 5px;
-  background: var(--back);
+  padding: 0;
+  background: var(--page-back);
+}
+
+.header-button {
+  height: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 22px;
+}
+
+.header-button_muted {
+  background: rgba(94, 84, 70, 0.16);
+  color: var(--muted);
+}
+
+.header-button:disabled {
+  opacity: 0.52;
 }
 
 .seat-table {
   position: relative;
   min-height: 0;
+  margin: 5px;
 }
 
 .seat-table__oval {
@@ -215,7 +286,7 @@ function submitName() {
   left: 50%;
   top: 50%;
   display: none;
-  width: 14px;
+  width: 20px;
   height: 2px;
   border-radius: 999px;
   background: var(--plus-color);
@@ -258,7 +329,7 @@ function submitName() {
   border: none;
 }
 
-.seat_taken span {
+.seat__name {
   width: 100%;
   height: 100%;
   color: var(--ink);
@@ -267,9 +338,36 @@ function submitName() {
   text-align: center;
 }
 
+.seat__remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 2px 6px rgba(29, 29, 29, 0.22);
+}
+
+.seat__remove::before,
+.seat__remove::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--back-soft);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.seat__remove::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
 .seat_own {
   outline: 2px solid var(--ink);
-  outline-offset: 2px;
 }
 
 .seat_1 {
@@ -316,49 +414,15 @@ function submitName() {
   left: 8%;
 }
 
-.room-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.room-actions button {
-  min-height: 54px;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  font-size: 24px;
-}
-
-.start-button {
-  background: var(--gold);
-  color: var(--ink);
-}
-
-.start-button:disabled {
-  opacity: 0.52;
-}
-
-.leave-room-button:disabled {
-  opacity: 0.52;
-}
-
-.close-room-button,
-.leave-room-button {
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--muted);
-}
-
-.leave-room-button {
-  grid-column: 1 / -1;
-}
-
 .screen-error {
   margin: 0;
+  padding: 5px;
   color: var(--red);
   font-size: 16px;
 }
 
-.name-dialog {
+.name-dialog,
+.close-room-dialog {
   position: fixed;
   inset: 0;
   z-index: 10;
@@ -368,7 +432,8 @@ function submitName() {
   background: rgba(29, 29, 29, 0.18);
 }
 
-.name-dialog__form {
+.name-dialog__form,
+.close-room-dialog__form {
   display: grid;
   gap: 10px;
   width: min(100%, 360px);
@@ -376,6 +441,14 @@ function submitName() {
   border-radius: 6px;
   padding: 12px;
   background: var(--back-soft);
+}
+
+.close-room-dialog__form p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
 }
 
 .name-dialog__input {
@@ -395,30 +468,35 @@ function submitName() {
   border-color: rgba(94, 84, 70, 0.5);
 }
 
-.name-dialog__actions {
+.name-dialog__actions,
+.close-room-dialog__actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-.name-dialog__actions button {
+.name-dialog__actions button,
+.close-room-dialog__actions button {
   min-height: 44px;
   border: none;
   border-radius: 6px;
   font-size: 20px;
 }
 
-.name-dialog__cancel {
+.name-dialog__cancel,
+.close-room-dialog__cancel {
   background: rgba(94, 84, 70, 0.16);
   color: var(--muted);
 }
 
-.name-dialog__submit {
+.name-dialog__submit,
+.close-room-dialog__submit {
   background: var(--gold);
   color: var(--ink);
 }
 
-.name-dialog__actions button:disabled {
+.name-dialog__actions button:disabled,
+.close-room-dialog__actions button:disabled {
   opacity: 0.5;
 }
 </style>

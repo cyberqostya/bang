@@ -36,7 +36,7 @@ defineEmits(["select"]);
   >
     <img :src="card.image" :alt="card.title" />
     <span class="hand-card__number">{{ card.deckNumber }}</span>
-    <span v-if="isDiscarding" class="hand-card__discard-mark">×</span>
+    <span v-if="isDiscarding" class="hand-card__discard-mark"></span>
   </button>
 </template>
 
@@ -105,17 +105,34 @@ defineEmits(["select"]);
 
 .hand-card__discard-mark {
   position: absolute;
-  right: 5px;
-  top: 5px;
+  right: -5px;
+  top: -5px;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 18px;
+  height: 18px;
   border-radius: 999px;
-  background: rgba(201, 74, 53, 0.9);
+  background: var(--ink);
+  box-shadow: 0 2px 6px rgba(29, 29, 29, 0.22);
   color: var(--back);
   font-size: 22px;
   line-height: 1;
+}
+.hand-card__discard-mark::before,
+.hand-card__discard-mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--back-soft);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.hand-card__discard-mark::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 @keyframes selected-card-shake {

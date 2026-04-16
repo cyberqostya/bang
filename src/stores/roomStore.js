@@ -81,7 +81,7 @@ export const useRoomStore = defineStore("room", () => {
       return `Подключаемся к серверу (${connectionAttemptSecondsLeft.value} сек)`;
     }
 
-    if (totalConnectionAttempts.value >= maxTotalConnectionAttempts) {
+    if (totalConnectionAttempts.value >= maxAutoConnectionAttempts) {
       return "Перезагрузить страницу";
     }
 

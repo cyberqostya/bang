@@ -1,14 +1,17 @@
 ﻿<script setup>
 import { computed, ref, watch } from "vue";
+import AppHeader from "../components/AppHeader.vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
 import BulletStack from "../components/BulletStack.vue";
-import PlayerList from "../components/PlayerList.vue";
+import GamePlayersTable from "../components/GamePlayersTable.vue";
 import RoleCardButton from "../components/RoleCardButton.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
+const viewMode = ref("cards");
 const isEndTurnDialogOpen = ref(false);
+const isLeaveGameDialogOpen = ref(false);
 const endTurnDialogMode = ref("confirm");
 const finishDelayLeft = ref(0);
 const turnPlayerName = computed(
@@ -45,6 +48,23 @@ watch(
     }, 1000);
   },
 );
+
+function toggleViewMode() {
+  viewMode.value = viewMode.value === "cards" ? "players" : "cards";
+}
+
+function openLeaveGameDialog() {
+  isLeaveGameDialogOpen.value = true;
+}
+
+function closeLeaveGameDialog() {
+  isLeaveGameDialogOpen.value = false;
+}
+
+function confirmLeaveGame() {
+  roomStore.leaveRoom();
+  closeLeaveGameDialog();
+}
 
 function openEndTurnDialog() {
   if (!roomStore.isMyTurn || roomStore.room.status !== "game") return;
@@ -94,8 +114,32 @@ function formatMessageTime(timestamp) {
 
 <template>
   <main class="app" @click="roomStore.cancelSelectedCard">
-    <div class="game-top">
-      <PlayerList />
+    <AppHeader>
+      <template #left>
+        <button
+          class="leave-game-button"
+          type="button"
+          @click.stop="openLeaveGameDialog"
+        >
+          Покинуть игру
+        </button>
+      </template>
+      <template #right>
+        <button
+          class="header-switch"
+          type="button"
+          @click.stop="toggleViewMode"
+        >
+          {{ viewMode === "cards" ? "К игрокам" : "К картам" }}
+        </button>
+      </template>
+    </AppHeader>
+
+    <section v-if="viewMode === 'players'" class="players-view">
+      <GamePlayersTable />
+    </section>
+
+    <section v-else class="cards-view">
       <section class="action-feed" aria-label="События игрока">
         <p
           v-for="message in playerMessages"
@@ -116,31 +160,31 @@ function formatMessageTime(timestamp) {
           </span>
         </p>
       </section>
-    </div>
 
-    <PlayZone title="Стол" variant="table">
-      <div class="table-main">
-        <BulletStack />
-        <RoleCardButton />
-      </div>
-      <div v-if="roomStore.room.status === 'game'" class="turn-row">
-        <button
-          class="end-turn-button"
-          :class="{ 'end-turn-button_active': roomStore.isMyTurn }"
-          type="button"
-          :disabled="!roomStore.isMyTurn"
-          @click.stop="openEndTurnDialog"
-        >
-          {{
-            roomStore.isMyTurn
-              ? "Завершить ход"
-              : `Ход игрока: ${turnPlayerName}`
-          }}
-        </button>
-      </div>
-    </PlayZone>
+      <PlayZone title="Стол" variant="table">
+        <div class="table-main">
+          <BulletStack />
+          <RoleCardButton />
+        </div>
+        <div v-if="roomStore.room.status === 'game'" class="turn-row">
+          <button
+            class="end-turn-button"
+            :class="{ 'end-turn-button_active': roomStore.isMyTurn }"
+            type="button"
+            :disabled="!roomStore.isMyTurn"
+            @click.stop="openEndTurnDialog"
+          >
+            {{
+              roomStore.isMyTurn
+                ? "Завершить ход"
+                : `Ход игрока: ${turnPlayerName}`
+            }}
+          </button>
+        </div>
+      </PlayZone>
 
-    <BottomPanel />
+      <BottomPanel />
+    </section>
 
     <div
       v-if="isEndTurnDialogOpen"
@@ -169,11 +213,38 @@ function formatMessageTime(timestamp) {
           </button>
           <button
             class="turn-dialog__submit"
-            :class="{ 'turn-dialog__submit_wide': endTurnDialogMode === 'discard' }"
+            :class="{
+              'turn-dialog__submit_wide': endTurnDialogMode === 'discard',
+            }"
             type="submit"
           >
             {{ endTurnDialogMode === "discard" ? "Окей" : "Да" }}
           </button>
+        </div>
+      </form>
+    </div>
+
+    <div
+      v-if="isLeaveGameDialogOpen"
+      class="leave-game-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Покинуть игру"
+      @click.stop
+    >
+      <form class="leave-game-dialog__form" @submit.prevent="confirmLeaveGame">
+        <p>
+          Вы действительно хотите покинуть игру? Ваш персонаж мгновенно умрёт.
+        </p>
+        <div class="leave-game-dialog__actions">
+          <button
+            class="leave-game-dialog__cancel"
+            type="button"
+            @click="closeLeaveGameDialog"
+          >
+            Нет
+          </button>
+          <button class="leave-game-dialog__submit" type="submit">Да</button>
         </div>
       </form>
     </div>
@@ -205,10 +276,37 @@ function formatMessageTime(timestamp) {
 </template>
 
 <style scoped>
-.game-top {
+.header-switch {
+  height: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: rgba(94, 84, 70, 0.16);
+  color: var(--muted);
+  font-size: 22px;
+}
+
+.leave-game-button {
+  height: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: rgba(94, 84, 70, 0.16);
+  color: var(--muted);
+  font-size: 22px;
+}
+
+.cards-view {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 5px;
   min-width: 0;
+  min-height: 0;
+}
+
+.players-view {
+  min-width: 0;
+  min-height: 0;
   padding: 5px;
 }
 
@@ -268,7 +366,7 @@ function formatMessageTime(timestamp) {
   min-height: 42px;
   border-radius: 6px;
   padding: 0 10px;
-  background: var(--gold);
+  background: rgba(94, 84, 70, 0.16);
   color: var(--ink);
   font-size: 22px;
   opacity: 0.72;
@@ -288,24 +386,8 @@ function formatMessageTime(timestamp) {
   animation: end-turn-pulse 1150ms ease-in-out infinite;
 }
 
-@keyframes end-turn-pulse {
-  0%,
-  100% {
-    filter: brightness(0.94);
-    box-shadow:
-      0 0 0 2px rgba(153, 57, 40, 0.14),
-      0 0 14px rgba(153, 57, 40, 0.28);
-  }
-
-  50% {
-    filter: brightness(1.12);
-    box-shadow:
-      0 0 0 3px rgba(240, 160, 32, 0.3),
-      0 0 24px rgba(153, 57, 40, 0.54);
-  }
-}
-
 .turn-dialog,
+.leave-game-dialog,
 .result-dialog {
   position: fixed;
   inset: 0;
@@ -321,6 +403,7 @@ function formatMessageTime(timestamp) {
 }
 
 .turn-dialog__form,
+.leave-game-dialog__form,
 .result-dialog__panel {
   display: grid;
   gap: 10px;
@@ -332,6 +415,7 @@ function formatMessageTime(timestamp) {
 }
 
 .turn-dialog__form p,
+.leave-game-dialog__form p,
 .result-dialog__panel p {
   margin: 0;
   color: var(--ink);
@@ -340,13 +424,15 @@ function formatMessageTime(timestamp) {
   text-align: center;
 }
 
-.turn-dialog__actions {
+.turn-dialog__actions,
+.leave-game-dialog__actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .turn-dialog__actions button,
+.leave-game-dialog__actions button,
 .result-dialog__panel button {
   min-height: 44px;
   border-radius: 6px;
@@ -358,12 +444,14 @@ function formatMessageTime(timestamp) {
   opacity: 0.52;
 }
 
-.turn-dialog__cancel {
+.turn-dialog__cancel,
+.leave-game-dialog__cancel {
   background: rgba(94, 84, 70, 0.16);
   color: var(--muted);
 }
 
 .turn-dialog__submit,
+.leave-game-dialog__submit,
 .result-dialog__panel button {
   background: var(--gold);
   color: var(--ink);
@@ -371,5 +459,22 @@ function formatMessageTime(timestamp) {
 
 .turn-dialog__submit_wide {
   grid-column: 1 / -1;
+}
+
+@keyframes end-turn-pulse {
+  0%,
+  100% {
+    filter: brightness(0.94);
+    box-shadow:
+      0 0 0 2px rgba(153, 57, 40, 0.14),
+      0 0 14px rgba(153, 57, 40, 0.28);
+  }
+
+  50% {
+    filter: brightness(1.12);
+    box-shadow:
+      0 0 0 3px rgba(240, 160, 32, 0.3),
+      0 0 24px rgba(153, 57, 40, 0.54);
+  }
 }
 </style>

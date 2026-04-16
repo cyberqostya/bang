@@ -8,9 +8,16 @@ const roomStore = useRoomStore();
 const handCards = computed(() => roomStore.ownHand);
 
 function freezeLeavingCard(element) {
-  element.style.left = `${element.offsetLeft}px`;
-  element.style.top = `${element.offsetTop}px`;
-  element.style.width = `${element.offsetWidth}px`;
+  const cardRect = element.getBoundingClientRect();
+
+  element.style.width = `${cardRect.width}px`;
+  element.style.maxWidth = `${cardRect.width}px`;
+  element.style.height = `${cardRect.height}px`;
+  element.style.flexGrow = "0";
+  element.style.flexShrink = "0";
+  element.style.flexBasis = `${cardRect.width}px`;
+  element.style.zIndex = "20";
+  element.style.pointerEvents = "none";
 }
 </script>
 
@@ -20,6 +27,7 @@ function freezeLeavingCard(element) {
       class="hand-strip"
       name="hand-card"
       tag="div"
+      :duration="{ enter: 360, leave: 680 }"
       @before-leave="freezeLeavingCard"
       @click.stop
     >
@@ -70,8 +78,7 @@ function freezeLeavingCard(element) {
 }
 
 .hand-card-move,
-.hand-card-enter-active,
-.hand-card-leave-active {
+.hand-card-enter-active {
   transition:
     opacity 360ms ease,
     transform 360ms ease;
@@ -89,15 +96,18 @@ function freezeLeavingCard(element) {
 }
 
 .hand-card-leave-active {
-  position: absolute;
-  z-index: 20;
+  overflow: hidden;
+  transition:
+    flex-basis 260ms ease 420ms,
+    width 260ms ease 420ms,
+    max-width 260ms ease 420ms;
   animation: hand-card-fly-away 420ms ease forwards;
-  pointer-events: none;
 }
 
 .hand-card-leave-to {
-  opacity: 0;
-  transform: translateY(-220px) rotate(-16deg) scale(0.76);
+  width: 0 !important;
+  max-width: 0 !important;
+  flex-basis: 0 !important;
 }
 
 @keyframes hand-card-fly-away {
