@@ -1,4 +1,5 @@
 ﻿<script setup>
+import { computed, ref, watch } from "vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
 import BulletStack from "../components/BulletStack.vue";
@@ -7,21 +8,199 @@ import RoleCardButton from "../components/RoleCardButton.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
+const isEndTurnDialogOpen = ref(false);
+const endTurnDialogMode = ref("confirm");
+const finishDelayLeft = ref(0);
+const turnPlayerName = computed(
+  () =>
+    roomStore.players.find(
+      (player) => player.playerId === roomStore.room.game?.turnPlayerId,
+    )?.name || "",
+);
+const playerMessages = computed(() => roomStore.ownPlayer?.messages || []);
+const canFinishGameRoom = computed(
+  () => Boolean(roomStore.room.game?.winnerText) && finishDelayLeft.value === 0,
+);
+
+let finishDelayTimer = null;
+
+watch(
+  () => roomStore.room.game?.winnerText,
+  (winnerText) => {
+    window.clearInterval(finishDelayTimer);
+
+    if (!winnerText) {
+      finishDelayLeft.value = 0;
+      return;
+    }
+
+    finishDelayLeft.value = 10;
+    finishDelayTimer = window.setInterval(() => {
+      finishDelayLeft.value = Math.max(0, finishDelayLeft.value - 1);
+
+      if (finishDelayLeft.value === 0) {
+        window.clearInterval(finishDelayTimer);
+        finishDelayTimer = null;
+      }
+    }, 1000);
+  },
+);
+
+function openEndTurnDialog() {
+  if (!roomStore.isMyTurn || roomStore.room.status !== "game") return;
+
+  endTurnDialogMode.value = "confirm";
+  isEndTurnDialogOpen.value = true;
+}
+
+function closeEndTurnDialog() {
+  isEndTurnDialogOpen.value = false;
+  endTurnDialogMode.value = "confirm";
+}
+
+function confirmEndTurn() {
+  if (roomStore.mustDiscardCards) {
+    endTurnDialogMode.value = "discard";
+    return;
+  }
+
+  roomStore.endTurn();
+  closeEndTurnDialog();
+}
+
+function confirmDiscardCards() {
+  roomStore.startDiscardingCards();
+  closeEndTurnDialog();
+}
+
+function submitEndTurnDialog() {
+  if (endTurnDialogMode.value === "discard") {
+    confirmDiscardCards();
+    return;
+  }
+
+  confirmEndTurn();
+}
+
+function formatMessageTime(timestamp) {
+  if (!timestamp) return "";
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
 </script>
 
 <template>
   <main class="app" @click="roomStore.cancelSelectedCard">
     <div class="game-top">
-      <p v-if="roomStore.room.game?.winnerText" class="game-result">
-        {{ roomStore.room.game.winnerText }}
-      </p>
       <PlayerList />
+      <section class="action-feed" aria-label="События игрока">
+        <p
+          v-for="message in playerMessages"
+          :key="message.id"
+          class="action-feed__message"
+        >
+          <template v-if="message.type === 'target-card'">
+            <span class="action-feed__actor">{{ message.actorName }}</span>
+            <span> применил </span>
+            <span class="action-feed__card">"{{ message.cardTitle }}"</span>
+            <span> на вас</span>
+          </template>
+          <template v-else>
+            {{ message.text }}
+          </template>
+          <span v-if="message.createdAt" class="action-feed__time">
+            ({{ formatMessageTime(message.createdAt) }})
+          </span>
+        </p>
+      </section>
     </div>
+
     <PlayZone title="Стол" variant="table">
-      <BulletStack />
-      <RoleCardButton />
+      <div class="table-main">
+        <BulletStack />
+        <RoleCardButton />
+      </div>
+      <div v-if="roomStore.room.status === 'game'" class="turn-row">
+        <button
+          class="end-turn-button"
+          :class="{ 'end-turn-button_active': roomStore.isMyTurn }"
+          type="button"
+          :disabled="!roomStore.isMyTurn"
+          @click.stop="openEndTurnDialog"
+        >
+          {{
+            roomStore.isMyTurn
+              ? "Завершить ход"
+              : `Ход игрока: ${turnPlayerName}`
+          }}
+        </button>
+      </div>
     </PlayZone>
+
     <BottomPanel />
+
+    <div
+      v-if="isEndTurnDialogOpen"
+      class="turn-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Завершить ход"
+      @click.stop
+    >
+      <form class="turn-dialog__form" @submit.prevent="submitEndTurnDialog">
+        <p>
+          {{
+            endTurnDialogMode === "discard"
+              ? `Сбросьте лишние карты до ${roomStore.ownPlayer?.health || 0}`
+              : "Точно завершить ход?"
+          }}
+        </p>
+        <div class="turn-dialog__actions">
+          <button
+            v-if="endTurnDialogMode === 'confirm'"
+            class="turn-dialog__cancel"
+            type="button"
+            @click="closeEndTurnDialog"
+          >
+            Нет
+          </button>
+          <button
+            class="turn-dialog__submit"
+            :class="{ 'turn-dialog__submit_wide': endTurnDialogMode === 'discard' }"
+            type="submit"
+          >
+            {{ endTurnDialogMode === "discard" ? "Окей" : "Да" }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div
+      v-if="roomStore.room.game?.winnerText"
+      class="result-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Итоги игры"
+      @click.stop
+    >
+      <div class="result-dialog__panel">
+        <p>{{ roomStore.room.game.winnerText }}</p>
+        <button
+          type="button"
+          :disabled="!canFinishGameRoom"
+          @click="roomStore.finishGameRoom"
+        >
+          {{
+            canFinishGameRoom
+              ? "Завершить игру"
+              : `Завершить игру через ${finishDelayLeft}`
+          }}
+        </button>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -30,16 +209,167 @@ const roomStore = useRoomStore();
   display: grid;
   gap: 5px;
   min-width: 0;
+  padding: 5px;
 }
 
-.game-result {
-  margin: 0;
+.action-feed {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  height: calc(18px * 2.5 + 10px);
+  min-width: 0;
+  overflow-y: auto;
   border: 1px dashed var(--line);
   border-radius: 6px;
-  padding: 8px;
-  background: var(--gold);
+  padding: 5px 8px;
+  background: rgba(243, 241, 219, 0.72);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(94, 84, 70, 0.5) rgba(94, 84, 70, 0.12);
+}
+
+.action-feed__message {
+  margin: 0;
+  min-width: 0;
   color: var(--ink);
   font-size: 18px;
   line-height: 1;
+}
+
+.action-feed__actor {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.action-feed__card {
+  color: var(--red);
+}
+
+.action-feed__time {
+  color: var(--muted);
+}
+
+.table-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.turn-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.end-turn-button {
+  min-height: 42px;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 22px;
+  opacity: 0.72;
+}
+
+.end-turn-button:disabled {
+  cursor: default;
+}
+
+.end-turn-button_active {
+  background: var(--red);
+  color: var(--back);
+  opacity: 1;
+  box-shadow:
+    0 0 0 2px rgba(153, 57, 40, 0.16),
+    0 0 18px rgba(153, 57, 40, 0.34);
+  animation: end-turn-pulse 1150ms ease-in-out infinite;
+}
+
+@keyframes end-turn-pulse {
+  0%,
+  100% {
+    filter: brightness(0.94);
+    box-shadow:
+      0 0 0 2px rgba(153, 57, 40, 0.14),
+      0 0 14px rgba(153, 57, 40, 0.28);
+  }
+
+  50% {
+    filter: brightness(1.12);
+    box-shadow:
+      0 0 0 3px rgba(240, 160, 32, 0.3),
+      0 0 24px rgba(153, 57, 40, 0.54);
+  }
+}
+
+.turn-dialog,
+.result-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 5px;
+  background: rgba(29, 29, 29, 0.18);
+}
+
+.result-dialog {
+  z-index: 40;
+}
+
+.turn-dialog__form,
+.result-dialog__panel {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 320px);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--back-soft);
+}
+
+.turn-dialog__form p,
+.result-dialog__panel p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
+}
+
+.turn-dialog__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.turn-dialog__actions button,
+.result-dialog__panel button {
+  min-height: 44px;
+  border-radius: 6px;
+  font-size: 20px;
+}
+
+.result-dialog__panel button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.turn-dialog__cancel {
+  background: rgba(94, 84, 70, 0.16);
+  color: var(--muted);
+}
+
+.turn-dialog__submit,
+.result-dialog__panel button {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.turn-dialog__submit_wide {
+  grid-column: 1 / -1;
 }
 </style>

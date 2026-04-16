@@ -9,6 +9,7 @@ import {
   normalizeRoomName,
   parseMessage,
 } from "./utils.js";
+import { cardConfig, createTestDeck } from "./cards.js";
 import { getRolesForPlayerCount, roleConfig } from "./roles.js";
 
 export function startGameServer() {
@@ -97,6 +98,11 @@ export function startGameServer() {
 
     if (message.type === "game:action") {
       applyGameAction(client, message.payload);
+      return;
+    }
+
+    if (message.type === "game:finish-room") {
+      finishRoom(client);
     }
   }
 
@@ -269,6 +275,27 @@ export function startGameServer() {
     deleteRoom(room.id);
   }
 
+  function finishRoom(client) {
+    const room = getClientRoom(client);
+
+    if (!room) {
+      sendError(client.socket, "Сначала войдите в комнату");
+      return;
+    }
+
+    if (room.status !== "finished") {
+      sendError(client.socket, "Игра еще не завершена");
+      return;
+    }
+
+    if (findSeatIndexByPlayerId(room, client.playerId) === null && client.playerId !== room.hostPlayerId) {
+      sendError(client.socket, "Завершить комнату может участник игры");
+      return;
+    }
+
+    deleteRoom(room.id);
+  }
+
   function takeSeat(client, payload = {}) {
     const room = getClientRoom(client);
 
@@ -309,6 +336,8 @@ export function startGameServer() {
       isRoleRevealed: false,
       isAlive: true,
       connected: true,
+      hand: [],
+      messages: [],
     };
     client.seatIndex = seatIndex;
 
@@ -343,6 +372,7 @@ export function startGameServer() {
     assignRoles(room);
     room.status = "game";
     room.startedAt = Date.now();
+    startTurn(room, room.game.turnPlayerId);
     scheduleGameExpiration(room);
     broadcastRoom(room.id);
     broadcastRoomList();
@@ -373,12 +403,141 @@ export function startGameServer() {
       return;
     }
 
+    if (payload.action === "endTurn") {
+      endTurn(client, room);
+      return;
+    }
+
+    if (room.game.turnPlayerId !== client.playerId) {
+      sendError(client.socket, "Сейчас не ваш ход");
+      return;
+    }
+
+    if (payload.action === "discardCard") {
+      discardCardFromHand(client, room, payload);
+      return;
+    }
+
     if (payload.action === "bang") {
-      applyBangAction(client, room, payload);
+      playCardAction(client, room, payload);
       return;
     }
 
     sendError(client.socket, "Неизвестное действие");
+  }
+
+  function endTurn(client, room) {
+    if (room.game.winner) {
+      sendError(client.socket, "Игра уже завершена");
+      return;
+    }
+
+    if (room.game.turnPlayerId !== client.playerId) {
+      sendError(client.socket, "Завершить можно только свой ход");
+      return;
+    }
+
+    const actor = room.seats.find((seat) => seat.player?.playerId === client.playerId)?.player;
+
+    if (!actor) {
+      sendError(client.socket, "Игрок не найден");
+      return;
+    }
+
+    if (actor.hand.length > actor.health) {
+      sendError(client.socket, `Сбросьте лишние карты до ${actor.health}`);
+      return;
+    }
+
+    completeTurn(room, client.playerId);
+    broadcastRoom(room.id);
+  }
+
+  function completeTurn(room, playerId) {
+    const nextPlayerId = getNextTurnPlayerId(room, playerId);
+
+    if (!nextPlayerId) {
+      return false;
+    }
+
+    startTurn(room, nextPlayerId);
+    addGameEvent(room, "Ход передан следующему игроку.");
+    return true;
+  }
+
+  function discardCardFromHand(client, room, payload = {}) {
+    const actor = room.seats.find((seat) => seat.player?.playerId === client.playerId)?.player;
+    const cardIndex = actor?.hand.findIndex((card) => card.instanceId === payload.cardInstanceId) ?? -1;
+
+    if (!actor || cardIndex === -1) {
+      sendError(client.socket, "Карты нет на руке");
+      return;
+    }
+
+    if (actor.hand.length <= actor.health) {
+      sendError(client.socket, "Лишних карт нет");
+      return;
+    }
+
+    const [discardedCard] = actor.hand.splice(cardIndex, 1);
+
+    room.game.discard.push(discardedCard);
+
+    if (actor.hand.length <= actor.health) {
+      completeTurn(room, client.playerId);
+    }
+
+    broadcastRoom(room.id);
+  }
+
+  function playCardAction(client, room, payload = {}) {
+    const actor = room.seats.find((seat) => seat.player?.playerId === client.playerId)?.player;
+    const cardIndex = actor?.hand.findIndex((card) => card.instanceId === payload.cardInstanceId) ?? -1;
+
+    if (!actor || cardIndex === -1) {
+      sendError(client.socket, "Карты нет на руке");
+      return;
+    }
+
+    const card = actor.hand[cardIndex];
+    const configForCard = cardConfig[card.cardId];
+
+    if (!configForCard || configForCard.action !== payload.action) {
+      sendError(client.socket, "Некорректная карта");
+      return;
+    }
+
+    if (configForCard.effectLimitKey && room.game.turnPlayedEffects[client.playerId]?.[configForCard.effectLimitKey]) {
+      sendError(client.socket, "Эту карту уже играли в этот ход");
+      return;
+    }
+
+    if (payload.action === "bang") {
+      const result = applyBangAction(client, room, payload);
+
+      if (!result) return;
+
+      addPlayerMessage(result.targetPlayer, {
+        type: "target-card",
+        actorName: actor.name,
+        cardTitle: configForCard.title,
+        text: formatTargetMessage(configForCard, actor),
+      });
+    }
+
+    if (configForCard.effectLimitKey) {
+      room.game.turnPlayedEffects[client.playerId] = {
+        ...room.game.turnPlayedEffects[client.playerId],
+        [configForCard.effectLimitKey]: true,
+      };
+    }
+
+    if (configForCard.disposable) {
+      const [discardedCard] = actor.hand.splice(cardIndex, 1);
+      room.game.discard.push(discardedCard);
+    }
+
+    broadcastRoom(room.id);
   }
 
   function applyBangAction(client, room, payload = {}) {
@@ -386,27 +545,27 @@ export function startGameServer() {
 
     if (!targetPlayerId || targetPlayerId === client.playerId) {
       sendError(client.socket, "Некорректная цель");
-      return;
+      return false;
     }
 
     const targetSeatIndex = findSeatIndexByPlayerId(room, targetPlayerId);
 
     if (targetSeatIndex === null) {
       sendError(client.socket, "Игрок не найден");
-      return;
+      return false;
     }
 
     const targetPlayer = room.seats[targetSeatIndex].player;
 
     if (!targetPlayer.isAlive) {
       sendError(client.socket, "Игрок уже выбыл");
-      return;
+      return false;
     }
 
     targetPlayer.health = Math.max(0, targetPlayer.health - 1);
     revealDeadPlayer(room, targetPlayer);
     checkVictory(room);
-    broadcastRoom(room.id);
+    return { targetPlayer };
   }
 
   function leaveSeat(roomId, playerId, options = {}) {
@@ -501,15 +660,26 @@ export function startGameServer() {
       name: room.name,
       status: room.status,
       hostPlayerId: room.hostPlayerId,
-      game: room.game,
+      game: getPublicGame(room),
       seats: room.seats.map((seat) => ({
         index: seat.index,
-        player: seat.player ? getPublicPlayer(seat.player, viewerPlayerId) : null,
+        player: seat.player ? getPublicPlayer(room, seat.player, viewerPlayerId) : null,
       })),
     };
   }
 
-  function getPublicPlayer(player, viewerPlayerId) {
+  function getPublicGame(room) {
+    return {
+      turnPlayerId: room.game.turnPlayerId,
+      winner: room.game.winner,
+      winnerText: room.game.winnerText,
+      events: room.game.events,
+      deckCount: room.game.deck.length,
+      discardCount: room.game.discard.length,
+    };
+  }
+
+  function getPublicPlayer(room, player, viewerPlayerId) {
     const role = player.roleId ? roleConfig[player.roleId] : null;
     const canSeeRole = Boolean(role && (player.playerId === viewerPlayerId || role.isPublic || player.isRoleRevealed));
 
@@ -523,12 +693,43 @@ export function startGameServer() {
       connected: player.connected,
       isAlive: player.isAlive,
       isRoleRevealed: player.isRoleRevealed,
+      handCount: player.hand?.length || 0,
+      hand: player.playerId === viewerPlayerId ? getPublicHand(room, player) : [],
+      messages: player.playerId === viewerPlayerId ? player.messages || [] : [],
       role: canSeeRole ? {
         id: role.id,
         label: role.label,
         team: role.team,
       } : null,
     };
+  }
+
+  function getPublicHand(room, player) {
+    return (player.hand || []).map((card) => {
+      const configForCard = cardConfig[card.cardId];
+
+      return {
+        ...card,
+        title: configForCard.title,
+        image: configForCard.image,
+        action: configForCard.action,
+        needsTarget: configForCard.needsTarget,
+        disposable: configForCard.disposable,
+        effectLimitKey: configForCard.effectLimitKey,
+        suit: configForCard.suit,
+        rank: configForCard.rank,
+        targetMessage: configForCard.targetMessage,
+        isPlayable: isCardPlayable(room, player, configForCard),
+      };
+    });
+  }
+
+  function isCardPlayable(room, player, configForCard) {
+    if (room.status !== "game") return false;
+    if (!player.isAlive || room.game.turnPlayerId !== player.playerId) return false;
+    if (!configForCard.effectLimitKey) return true;
+
+    return !room.game.turnPlayedEffects[player.playerId]?.[configForCard.effectLimitKey];
   }
 
   function getPublicRooms() {
@@ -571,6 +772,9 @@ export function startGameServer() {
       winner: null,
       winnerText: "",
       events: [],
+      deck: [],
+      discard: [],
+      turnPlayedEffects: {},
     };
   }
 
@@ -586,6 +790,8 @@ export function startGameServer() {
       player.isAlive = true;
       player.health = config.defaultHealth;
       player.maxHealth = config.defaultHealth;
+      player.hand = [];
+      player.messages = [];
 
       if (player.roleId === "sheriff") {
         player.maxHealth += 1;
@@ -600,7 +806,77 @@ export function startGameServer() {
     room.game.winner = null;
     room.game.winnerText = "";
     room.game.events = [];
+    room.game.deck = shuffle(createTestDeck());
+    room.game.discard = [];
+    room.game.turnPlayedEffects = {};
+    dealInitialHands(room);
     addGameEvent(room, "Роли розданы. Шериф ходит первым.");
+  }
+
+  function dealInitialHands(room) {
+    room.seats.forEach((seat) => {
+      if (seat.player) {
+        drawCards(room, seat.player.playerId, seat.player.health);
+      }
+    });
+  }
+
+  function startTurn(room, playerId) {
+    if (!playerId) return;
+
+    room.game.turnPlayerId = playerId;
+    room.game.turnPlayedEffects[playerId] = {};
+    drawCards(room, playerId, 2);
+  }
+
+  function drawCards(room, playerId, count) {
+    const player = room.seats.find((seat) => seat.player?.playerId === playerId)?.player;
+    const drawnCards = [];
+
+    if (!player) return;
+
+    for (let index = 0; index < count; index += 1) {
+      refillDeckIfNeeded(room);
+
+      const card = room.game.deck.shift();
+
+      if (!card) return;
+
+      drawnCards.push(card);
+    }
+
+    player.hand = [
+      ...drawnCards,
+      ...player.hand,
+    ];
+  }
+
+  function refillDeckIfNeeded(room) {
+    if (room.game.deck.length >= 7 || room.game.discard.length === 0) return;
+
+    room.game.deck = [
+      ...room.game.deck,
+      ...shuffle(room.game.discard),
+    ];
+    room.game.discard = [];
+    addGameEvent(room, "Сброс перемешан и ушел под колоду.");
+  }
+
+  function addPlayerMessage(player, message) {
+    player.messages = [
+      {
+        id: randomUUID(),
+        createdAt: Date.now(),
+        ...message,
+      },
+      ...(player.messages || []),
+    ].slice(0, 5);
+  }
+
+  function formatTargetMessage(configForCard, actor) {
+    return (configForCard.targetMessage || "")
+      .replace("{actor}", actor.name)
+      .replace("{card}", configForCard.title);
   }
 
   function revealDeadPlayer(room, player) {
@@ -657,6 +933,23 @@ export function startGameServer() {
     return room.seats
       .filter((seat) => seat.player?.isAlive)
       .map((seat) => seat.player);
+  }
+
+  function getNextTurnPlayerId(room, currentPlayerId) {
+    const currentSeatIndex = findSeatIndexByPlayerId(room, currentPlayerId);
+
+    if (currentSeatIndex === null) return null;
+
+    for (let offset = 1; offset <= room.seats.length; offset += 1) {
+      const nextSeatIndex = (currentSeatIndex + offset) % room.seats.length;
+      const nextPlayer = room.seats[nextSeatIndex].player;
+
+      if (nextPlayer?.isAlive) {
+        return nextPlayer.playerId;
+      }
+    }
+
+    return null;
   }
 
   function addGameEvent(room, text) {

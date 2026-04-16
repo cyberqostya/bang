@@ -30,22 +30,23 @@ defineProps({
   width: 100%;
   min-width: 0;
   min-height: 0;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
+  border-top: 1px dashed var(--line);
   background: var(--back-soft);
 }
 
 .play-zone__title {
   position: absolute;
   top: 0;
-  left: 18px;
+  left: 50%;
   z-index: 1;
   display: block;
-  transform: translateY(-50%);
-  padding: 0 9px;
-  background: var(--back);
+  transform: translate(-50%, -50%);
+  padding: 0 10px;
+  background: var(--back-soft);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
   color: var(--muted);
-  font-size: 22px;
+  font-size: 24px;
   line-height: 1;
 }
 
@@ -54,11 +55,7 @@ defineProps({
   min-width: 0;
   height: 100%;
   min-height: 0;
-  padding: 10px;
-}
-
-.play-zone_hand {
-  min-height: 132px;
+  padding: 10px 5px 5px;
 }
 
 .play-zone_hand .play-zone__content {
@@ -69,9 +66,8 @@ defineProps({
 }
 
 .play-zone_table .play-zone__content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 10px;
   overflow: visible;
 }

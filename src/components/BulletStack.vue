@@ -1,5 +1,12 @@
 ﻿<script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { healthConfig } from "../config/healthConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
@@ -16,13 +23,15 @@ const fallbackPlayer = {
 };
 
 const ownPlayer = computed(() => roomStore.ownPlayer || fallbackPlayer);
-const bulletImage = computed(() => getBulletImage(ownPlayer.value.bulletSkinIndex));
-const bullets = computed(() => (
+const bulletImage = computed(() =>
+  getBulletImage(ownPlayer.value.bulletSkinIndex),
+);
+const bullets = computed(() =>
   Array.from({ length: ownPlayer.value.maxHealth }, (_, index) => ({
     id: index,
     isLoaded: index < ownPlayer.value.health,
-  }))
-));
+  })),
+);
 const bulletOverlap = computed(() => {
   const count = bullets.value.length;
 
@@ -140,7 +149,6 @@ async function updateBulletMetrics() {
 
 .bullet_empty img {
   opacity: 0.14;
-  transform: scale(0.88);
   filter: grayscale(1);
 }
 </style>

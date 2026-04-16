@@ -18,3 +18,11 @@ export const cardConfig = {
     targetMessage: "Игрок {actor} применил карту Bang на вас",
   },
 };
+
+export function createTestDeck() {
+  return Array.from({ length: 80 }, (_, index) => ({
+    instanceId: `bang-${index + 1}`,
+    cardId: "bang",
+    deckNumber: index + 1,
+  }));
+}

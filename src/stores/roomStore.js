@@ -1,6 +1,5 @@
 ﻿import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { cardConfig } from "../config/cardConfig.js";
 
 const fallbackRoom = {
   id: "",
@@ -12,47 +11,131 @@ const fallbackRoom = {
     player: null,
   })),
 };
+const connectionAttemptSeconds = 5;
+const maxAutoConnectionAttempts = 3;
+const maxTotalConnectionAttempts = 3;
 
 export const useRoomStore = defineStore("room", () => {
   const screen = ref("rooms");
   const playerId = ref(getStoredPlayerId());
   const connectionStatus = ref("idle");
   const error = ref("");
+  const connectionAttempt = ref(0);
+  const connectionAttemptSecondsLeft = ref(0);
+  const totalConnectionAttempts = ref(0);
   const room = ref(fallbackRoom);
   const rooms = ref([]);
+  const isDiscardingCards = ref(false);
   const selectedCardId = ref("");
   const socket = ref(null);
+  let connectCountdownTimer = null;
+  let connectTimeoutTimer = null;
 
-  const players = computed(() => (
+  const players = computed(() =>
     room.value.seats
       .filter((seat) => seat.player)
       .map((seat) => ({
         seatIndex: seat.index,
         ...seat.player,
-      }))
-  ));
-  const ownPlayer = computed(() => players.value.find((player) => player.playerId === playerId.value) || null);
+      })),
+  );
+  const ownPlayer = computed(
+    () =>
+      players.value.find((player) => player.playerId === playerId.value) ||
+      null,
+  );
   const isConnected = computed(() => connectionStatus.value === "connected");
   const hasRoom = computed(() => Boolean(room.value.id));
-  const isHost = computed(() => Boolean(playerId.value) && room.value.hostPlayerId === playerId.value);
+  const isHost = computed(
+    () => Boolean(playerId.value) && room.value.hostPlayerId === playerId.value,
+  );
   const isSeated = computed(() => Boolean(ownPlayer.value));
-  const canStartGame = computed(() => isHost.value && isSeated.value && players.value.length > 1);
-  const selectedCard = computed(() => cardConfig[selectedCardId.value] || null);
+  const canStartGame = computed(
+    () => isHost.value && isSeated.value && players.value.length > 1,
+  );
+  const isMyTurn = computed(
+    () => room.value.game?.turnPlayerId === playerId.value,
+  );
+  const ownHand = computed(() => ownPlayer.value?.hand || []);
+  const mustDiscardCards = computed(
+    () =>
+      room.value.status === "game" &&
+      isMyTurn.value &&
+      Boolean(ownPlayer.value) &&
+      ownHand.value.length > ownPlayer.value.health,
+  );
+  const selectedCard = computed(
+    () =>
+      ownHand.value.find((card) => card.instanceId === selectedCardId.value) ||
+      null,
+  );
   const wsUrl = computed(() => getWebSocketUrl());
+  const connectionActionLabel = computed(() => {
+    if (isConnected.value) return "Сервер подключен";
+
+    if (connectionStatus.value === "connecting") {
+      if (totalConnectionAttempts.value <= maxAutoConnectionAttempts) {
+        return `Подключаемся к серверу ${connectionAttempt.value}/${maxAutoConnectionAttempts} (${connectionAttemptSecondsLeft.value} сек)`;
+      }
+
+      return `Подключаемся к серверу (${connectionAttemptSecondsLeft.value} сек)`;
+    }
+
+    if (totalConnectionAttempts.value >= maxTotalConnectionAttempts) {
+      return "Перезагрузить страницу";
+    }
+
+    return "Подключиться";
+  });
+  const canUseConnectionAction = computed(
+    () => !isConnected.value && connectionStatus.value !== "connecting",
+  );
 
   function connect() {
-    if (socket.value || connectionStatus.value === "connecting") return;
+    if (
+      socket.value?.readyState === WebSocket.OPEN ||
+      connectionStatus.value === "connecting"
+    )
+      return;
+    if (totalConnectionAttempts.value >= maxTotalConnectionAttempts) return;
 
+    totalConnectionAttempts.value += 1;
+    connectionAttempt.value = Math.min(
+      totalConnectionAttempts.value,
+      maxAutoConnectionAttempts,
+    );
+    connectionAttemptSecondsLeft.value = connectionAttemptSeconds;
     connectionStatus.value = "connecting";
-    socket.value = new WebSocket(getWebSocketUrl());
 
-    socket.value.addEventListener("open", () => {
+    const nextSocket = new WebSocket(getWebSocketUrl());
+
+    socket.value = nextSocket;
+    startConnectionCountdown();
+    connectTimeoutTimer = window.setTimeout(() => {
+      if (
+        socket.value !== nextSocket ||
+        nextSocket.readyState === WebSocket.OPEN
+      )
+        return;
+
+      failConnectionAttempt(nextSocket);
+    }, connectionAttemptSeconds * 1000);
+
+    nextSocket.addEventListener("open", () => {
+      if (socket.value !== nextSocket) return;
+
+      clearConnectionTimers();
+      connectionAttempt.value = 0;
+      connectionAttemptSecondsLeft.value = 0;
+      totalConnectionAttempts.value = 0;
       connectionStatus.value = "connected";
       error.value = "";
       send("client:hello", { playerId: playerId.value });
     });
 
-    socket.value.addEventListener("message", (event) => {
+    nextSocket.addEventListener("message", (event) => {
+      if (socket.value !== nextSocket) return;
+
       const message = parseMessage(event.data);
 
       if (!message) return;
@@ -60,15 +143,38 @@ export const useRoomStore = defineStore("room", () => {
       handleMessage(message);
     });
 
-    socket.value.addEventListener("close", () => {
-      connectionStatus.value = "closed";
-      socket.value = null;
+    nextSocket.addEventListener("close", () => {
+      if (socket.value !== nextSocket) return;
+
+      failConnectionAttempt(nextSocket);
     });
 
-    socket.value.addEventListener("error", () => {
-      connectionStatus.value = "error";
-      error.value = "Сервер недоступен";
+    nextSocket.addEventListener("error", () => {
+      if (socket.value !== nextSocket) return;
+
+      failConnectionAttempt(nextSocket);
     });
+  }
+
+  function reconnect() {
+    if (connectionStatus.value === "connecting") return;
+
+    if (totalConnectionAttempts.value >= maxTotalConnectionAttempts) {
+      window.location.reload();
+      return;
+    }
+
+    clearConnectionTimers();
+
+    if (socket.value) {
+      const currentSocket = socket.value;
+
+      socket.value = null;
+      currentSocket.close();
+    }
+
+    connectionStatus.value = "idle";
+    connect();
   }
 
   function createRoom(name, password) {
@@ -101,8 +207,24 @@ export const useRoomStore = defineStore("room", () => {
     send("room:close");
   }
 
-  function selectCard(cardId) {
-    selectedCardId.value = selectedCardId.value === cardId ? "" : cardId;
+  function finishGameRoom() {
+    send("game:finish-room");
+  }
+
+  function selectCard(cardInstanceId) {
+    if (isDiscardingCards.value) {
+      discardCard(cardInstanceId);
+      return;
+    }
+
+    const card = ownHand.value.find(
+      (candidate) => candidate.instanceId === cardInstanceId,
+    );
+
+    if (!card?.isPlayable) return;
+
+    selectedCardId.value =
+      selectedCardId.value === cardInstanceId ? "" : cardInstanceId;
   }
 
   function cancelSelectedCard() {
@@ -114,15 +236,40 @@ export const useRoomStore = defineStore("room", () => {
 
     send("game:action", {
       action: selectedCard.value.action,
-      cardId: selectedCard.value.id,
+      cardInstanceId: selectedCard.value.instanceId,
       targetPlayerId,
     });
     cancelSelectedCard();
   }
 
+  function endTurn() {
+    send("game:action", {
+      action: "endTurn",
+    });
+    cancelSelectedCard();
+  }
+
+  function startDiscardingCards() {
+    if (!mustDiscardCards.value) return;
+
+    isDiscardingCards.value = true;
+    cancelSelectedCard();
+  }
+
+  function discardCard(cardInstanceId) {
+    if (!isDiscardingCards.value || !mustDiscardCards.value) return;
+
+    send("game:action", {
+      action: "discardCard",
+      cardInstanceId,
+    });
+  }
+
   function startGame() {
     if (!canStartGame.value) {
-      error.value = isSeated.value ? "Нужно минимум два игрока за столом" : "Сначала займите место за столом";
+      error.value = isSeated.value
+        ? "Нужно минимум два игрока за столом"
+        : "Сначала займите место за столом";
       return;
     }
 
@@ -148,6 +295,7 @@ export const useRoomStore = defineStore("room", () => {
     if (message.type === "room:update") {
       room.value = message.payload.room || fallbackRoom;
       error.value = "";
+      syncDiscardMode();
       syncScreenWithRoom();
 
       return;
@@ -158,6 +306,7 @@ export const useRoomStore = defineStore("room", () => {
       screen.value = "rooms";
       error.value = "Комната закрыта";
       cancelSelectedCard();
+      isDiscardingCards.value = false;
       return;
     }
 
@@ -167,6 +316,7 @@ export const useRoomStore = defineStore("room", () => {
       screen.value = "rooms";
       error.value = "";
       cancelSelectedCard();
+      isDiscardingCards.value = false;
       return;
     }
 
@@ -203,15 +353,66 @@ export const useRoomStore = defineStore("room", () => {
     screen.value = "seats";
   }
 
+  function syncDiscardMode() {
+    if (!isDiscardingCards.value) return;
+
+    if (!mustDiscardCards.value) {
+      isDiscardingCards.value = false;
+    }
+  }
+
+  function startConnectionCountdown() {
+    window.clearInterval(connectCountdownTimer);
+
+    connectCountdownTimer = window.setInterval(() => {
+      connectionAttemptSecondsLeft.value = Math.max(
+        0,
+        connectionAttemptSecondsLeft.value - 1,
+      );
+    }, 1000);
+  }
+
+  function failConnectionAttempt(failedSocket) {
+    if (socket.value !== failedSocket) return;
+
+    clearConnectionTimers();
+    socket.value = null;
+    connectionStatus.value = "closed";
+    error.value = "Сервер недоступен";
+
+    if (failedSocket.readyState !== WebSocket.CLOSED) {
+      failedSocket.close();
+    }
+
+    if (totalConnectionAttempts.value < maxAutoConnectionAttempts) {
+      connect();
+    }
+  }
+
+  function clearConnectionTimers() {
+    window.clearInterval(connectCountdownTimer);
+    window.clearTimeout(connectTimeoutTimer);
+    connectCountdownTimer = null;
+    connectTimeoutTimer = null;
+  }
+
   return {
     canStartGame,
+    canUseConnectionAction,
+    connectionActionLabel,
+    connectionAttempt,
+    connectionAttemptSecondsLeft,
     connectionStatus,
     error,
     hasRoom,
     isConnected,
     isHost,
+    isDiscardingCards,
+    isMyTurn,
     isSeated,
     ownPlayer,
+    ownHand,
+    mustDiscardCards,
     playerId,
     players,
     room,
@@ -224,12 +425,17 @@ export const useRoomStore = defineStore("room", () => {
     closeRoom,
     connect,
     createRoom,
+    discardCard,
+    endTurn,
+    finishGameRoom,
     joinRoom,
     leaveRoom,
     leaveSeat,
     openOwnRoom,
+    reconnect,
     selectCard,
     startGame,
+    startDiscardingCards,
     takeSeat,
     useSelectedCard,
   };
@@ -268,7 +474,7 @@ function getWebSocketUrl() {
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-  return `${protocol}//${window.location.hostname}:3001`;
+  return `${protocol}//${window.location.host}/game-ws`;
 }
 
 function parseMessage(data) {

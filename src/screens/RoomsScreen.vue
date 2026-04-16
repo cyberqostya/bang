@@ -70,8 +70,21 @@ function submitJoinRoom() {
 <template>
   <main class="rooms-screen">
     <p class="connection-status">
-      {{ roomStore.isConnected ? "Сервер подключен" : `Подключение к ${roomStore.wsUrl}` }}
+      {{
+        roomStore.isConnected
+          ? "Сервер подключен"
+          : `Подключение к ${roomStore.wsUrl}`
+      }}
     </p>
+    <button
+      v-if="!roomStore.isConnected"
+      class="reconnect-button"
+      type="button"
+      :disabled="!roomStore.canUseConnectionAction"
+      @click="roomStore.reconnect"
+    >
+      <span>{{ roomStore.connectionActionLabel }}</span>
+    </button>
 
     <button
       class="create-room-button"
@@ -195,7 +208,7 @@ function submitJoinRoom() {
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   align-content: start;
   gap: 10px;
   width: min(100%, 600px);
@@ -212,7 +225,8 @@ function submitJoinRoom() {
   line-height: 1;
 }
 
-.create-room-button {
+.create-room-button,
+.reconnect-button {
   min-height: 54px;
   border: 1px dashed var(--line);
   border-radius: 6px;
@@ -222,6 +236,15 @@ function submitJoinRoom() {
 }
 
 .create-room-button:disabled {
+  opacity: 0.55;
+}
+
+.reconnect-button {
+  background: rgba(94, 84, 70, 0.16);
+  color: var(--muted);
+}
+
+.reconnect-button:disabled {
   opacity: 0.55;
 }
 

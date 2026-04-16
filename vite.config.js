@@ -8,4 +8,12 @@ export default defineConfig({
     emptyOutDir: true,
   },
   plugins: [vue()],
+  server: {
+    proxy: {
+      "/game-ws": {
+        target: "ws://localhost:3001",
+        ws: true,
+      },
+    },
+  },
 });

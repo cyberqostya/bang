@@ -15,7 +15,7 @@ const players = computed(() =>
       role: player.role,
       isAlive: player.isAlive,
       bulletImage: getBulletImage(player),
-      isTargetable: Boolean(roomStore.selectedCard && player.isAlive),
+      isTargetable: Boolean(roomStore.selectedCard?.needsTarget && roomStore.selectedCard?.isPlayable && player.isAlive),
     })),
 );
 
@@ -24,7 +24,10 @@ function getBulletImage(player) {
     return healthConfig.sheriffBulletImage;
   }
 
-  return healthConfig.bulletImages[player.bulletSkinIndex] || healthConfig.bulletImages[0];
+  return (
+    healthConfig.bulletImages[player.bulletSkinIndex] ||
+    healthConfig.bulletImages[0]
+  );
 }
 </script>
 
@@ -115,7 +118,7 @@ function getBulletImage(player) {
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
-  font-size: 18px;
+  font-size: 28px;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -123,8 +126,8 @@ function getBulletImage(player) {
 
 .player-card__role-icon {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
 }
 
@@ -140,7 +143,7 @@ function getBulletImage(player) {
 .player-card__health img {
   width: 16px;
   height: auto;
-  margin-left: -11px;
+  margin-left: -8px;
   object-fit: contain;
 }
 

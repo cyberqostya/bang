@@ -10,7 +10,6 @@ export const healthConfig = {
     "/images/bullets/7.webp",
     "/images/bullets/8.webp",
     "/images/bullets/9.webp",
-    "/images/bullets/10.webp",
   ],
   sheriffBulletImage: "/images/bullets/sheriff.webp",
 };

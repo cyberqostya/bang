@@ -77,20 +77,20 @@ function submitName() {
     <div class="room-actions">
       <button
         v-if="roomStore.isHost"
+        class="close-room-button"
+        type="button"
+        @click="roomStore.closeRoom"
+      >
+        Закрыть
+      </button>
+      <button
+        v-if="roomStore.isHost"
         class="start-button"
         type="button"
         :disabled="!roomStore.canStartGame"
         @click="roomStore.startGame"
       >
         Начать игру
-      </button>
-      <button
-        v-if="roomStore.isHost"
-        class="close-room-button"
-        type="button"
-        @click="roomStore.closeRoom"
-      >
-        Закрыть
       </button>
       <button
         v-else
