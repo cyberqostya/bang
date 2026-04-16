@@ -12,6 +12,10 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  canSelect: {
+    type: Boolean,
+    default: true,
+  },
   isDiscarding: {
     type: Boolean,
     default: false,
@@ -31,7 +35,7 @@ defineEmits(["select"]);
     }"
     type="button"
     :aria-pressed="isSelected"
-    :disabled="isDisabled"
+    :aria-disabled="!canSelect"
     @click.stop="$emit('select', card.instanceId)"
   >
     <img :src="card.image" :alt="card.title" />
@@ -82,13 +86,16 @@ defineEmits(["select"]);
   box-shadow:
     0 0 0 2px rgba(240, 160, 32, 0.45),
     0 10px 20px rgba(94, 84, 70, 0.2);
-  animation: selected-card-shake 720ms ease-in-out infinite;
 }
 
 .hand-card_disabled {
   cursor: default;
   filter: grayscale(1);
   opacity: 0.42;
+}
+
+.hand-card[aria-disabled="true"] {
+  cursor: default;
 }
 
 .hand-card_discarding {
@@ -133,17 +140,6 @@ defineEmits(["select"]);
 
 .hand-card__discard-mark::after {
   transform: translate(-50%, -50%) rotate(-45deg);
-}
-
-@keyframes selected-card-shake {
-  0%,
-  100% {
-    transform: translateY(-4px) rotate(-1deg);
-  }
-
-  50% {
-    transform: translateY(-4px) rotate(1deg);
-  }
 }
 
 @keyframes discard-card-shake {

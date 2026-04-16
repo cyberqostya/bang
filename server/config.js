@@ -3,6 +3,7 @@
   seatCount: 8,
   defaultHealth: 4,
   bulletSkinCount: 10,
+  hatSkinCount: 13,
   maxRoomNameLength: 15,
   maxPasswordLength: 40,
   maxActiveRooms: 100,

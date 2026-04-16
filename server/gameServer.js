@@ -111,7 +111,8 @@ export function startGameServer() {
 
   function attachPlayer(client, payload = {}) {
     const playerId = normalizePlayerId(payload.playerId) || randomUUID();
-    const playerRoom = findRoomByPlayerId(playerId) || findHostedRoomByPlayerId(playerId);
+    const playerRoom =
+      findRoomByPlayerId(playerId) || findHostedRoomByPlayerId(playerId);
 
     client.playerId = playerId;
     clearDisconnectTimer(playerId);
@@ -162,7 +163,10 @@ export function startGameServer() {
     }
 
     const name = normalizeRoomName(payload.name, config.maxRoomNameLength);
-    const password = normalizePassword(payload.password, config.maxPasswordLength);
+    const password = normalizePassword(
+      payload.password,
+      config.maxPasswordLength,
+    );
 
     if (!name) {
       sendError(client.socket, "Введите название комнаты");
@@ -191,7 +195,9 @@ export function startGameServer() {
     client.roomId = room.id;
     client.seatIndex = null;
 
-    send(client.socket, "room:update", { room: getPublicRoom(room, client.playerId) });
+    send(client.socket, "room:update", {
+      room: getPublicRoom(room, client.playerId),
+    });
     broadcastRoomList();
   }
 
@@ -210,14 +216,26 @@ export function startGameServer() {
       return;
     }
 
-    const isKnownPlayer = room.hostPlayerId === client.playerId || findSeatIndexByPlayerId(room, client.playerId) !== null;
+    const isKnownPlayer =
+      room.hostPlayerId === client.playerId ||
+      findSeatIndexByPlayerId(room, client.playerId) !== null;
 
     if (room.status === "game" && !isKnownPlayer) {
       sendError(client.socket, "Игра уже идет");
       return;
     }
 
-    if (!isKnownPlayer && room.password !== normalizePassword(payload.password, config.maxPasswordLength)) {
+    if (!isKnownPlayer && getRoomPlayersCount(room) >= room.seats.length) {
+      sendError(client.socket, "Комната заполнена");
+      broadcastRoomList();
+      return;
+    }
+
+    if (
+      !isKnownPlayer &&
+      room.password !==
+        normalizePassword(payload.password, config.maxPasswordLength)
+    ) {
       sendError(client.socket, "Неверный пароль");
       return;
     }
@@ -226,7 +244,9 @@ export function startGameServer() {
     client.seatIndex = findSeatIndexByPlayerId(room, client.playerId);
     clearEmptyRoomTimer(room.id);
 
-    send(client.socket, "room:update", { room: getPublicRoom(room, client.playerId) });
+    send(client.socket, "room:update", {
+      room: getPublicRoom(room, client.playerId),
+    });
     broadcastRoomList();
   }
 
@@ -305,7 +325,10 @@ export function startGameServer() {
       return;
     }
 
-    if (findSeatIndexByPlayerId(room, client.playerId) === null && client.playerId !== room.hostPlayerId) {
+    if (
+      findSeatIndexByPlayerId(room, client.playerId) === null &&
+      client.playerId !== room.hostPlayerId
+    ) {
       sendError(client.socket, "Завершить комнату может участник игры");
       return;
     }
@@ -349,6 +372,7 @@ export function startGameServer() {
       maxHealth: config.defaultHealth,
       bulletSkinIndex: getRandomBulletSkinIndex(),
       bulletSkinKey: "default",
+      hatSkinKey: null,
       roleId: null,
       isRoleRevealed: false,
       isAlive: true,
@@ -455,7 +479,9 @@ export function startGameServer() {
       return;
     }
 
-    const actor = room.seats.find((seat) => seat.player?.playerId === client.playerId)?.player;
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
 
     if (!actor) {
       sendError(client.socket, "Игрок не найден");
@@ -479,13 +505,17 @@ export function startGameServer() {
     }
 
     startTurn(room, nextPlayerId);
-    addGameEvent(room, "Ход передан следующему игроку.");
     return true;
   }
 
   function discardCardFromHand(client, room, payload = {}) {
-    const actor = room.seats.find((seat) => seat.player?.playerId === client.playerId)?.player;
-    const cardIndex = actor?.hand.findIndex((card) => card.instanceId === payload.cardInstanceId) ?? -1;
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const cardIndex =
+      actor?.hand.findIndex(
+        (card) => card.instanceId === payload.cardInstanceId,
+      ) ?? -1;
 
     if (!actor || cardIndex === -1) {
       sendError(client.socket, "Карты нет на руке");
@@ -500,6 +530,13 @@ export function startGameServer() {
     const [discardedCard] = actor.hand.splice(cardIndex, 1);
 
     room.game.discard.push(discardedCard);
+    addGameEvent(room, {
+      type: "discard",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      cardTitle: getCardTitle(discardedCard),
+      cardColor: getCardEventColor(discardedCard),
+    });
 
     if (actor.hand.length <= actor.health) {
       completeTurn(room, client.playerId);
@@ -509,8 +546,13 @@ export function startGameServer() {
   }
 
   function playCardAction(client, room, payload = {}) {
-    const actor = room.seats.find((seat) => seat.player?.playerId === client.playerId)?.player;
-    const cardIndex = actor?.hand.findIndex((card) => card.instanceId === payload.cardInstanceId) ?? -1;
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const cardIndex =
+      actor?.hand.findIndex(
+        (card) => card.instanceId === payload.cardInstanceId,
+      ) ?? -1;
 
     if (!actor || cardIndex === -1) {
       sendError(client.socket, "Карты нет на руке");
@@ -525,7 +567,12 @@ export function startGameServer() {
       return;
     }
 
-    if (configForCard.effectLimitKey && room.game.turnPlayedEffects[client.playerId]?.[configForCard.effectLimitKey]) {
+    if (
+      configForCard.effectLimitKey &&
+      room.game.turnPlayedEffects[client.playerId]?.[
+        configForCard.effectLimitKey
+      ]
+    ) {
       sendError(client.socket, "Эту карту уже играли в этот ход");
       return;
     }
@@ -535,12 +582,17 @@ export function startGameServer() {
 
       if (!result) return;
 
-      addPlayerMessage(result.targetPlayer, {
-        type: "target-card",
+      addGameEvent(room, {
+        type: "card",
         actorName: actor.name,
+        actorRoleId: actor.roleId,
         cardTitle: configForCard.title,
-        text: formatTargetMessage(configForCard, actor),
+        cardColor: configForCard.eventColor,
+        targetName: result.targetPlayer.name,
+        targetRoleId: result.targetPlayer.roleId,
       });
+      revealDeadPlayer(room, result.targetPlayer);
+      checkVictory(room);
     }
 
     if (configForCard.effectLimitKey) {
@@ -581,8 +633,6 @@ export function startGameServer() {
     }
 
     targetPlayer.health = Math.max(0, targetPlayer.health - 1);
-    revealDeadPlayer(room, targetPlayer);
-    checkVictory(room);
     return { targetPlayer };
   }
 
@@ -606,10 +656,14 @@ export function startGameServer() {
 
     clearDisconnectTimer(playerId);
     updateConnectedClientsSeat(room.id, playerId, null);
-    addGameEvent(room, `${player.name} покинул игру. Роль раскрыта.`);
+    addDeathEvent(room, player);
     checkVictory(room);
 
-    if (room.status === "game" && !room.game.winner && room.game.turnPlayerId === playerId) {
+    if (
+      room.status === "game" &&
+      !room.game.winner &&
+      room.game.turnPlayerId === playerId
+    ) {
       completeTurn(room, playerId);
     }
   }
@@ -709,7 +763,9 @@ export function startGameServer() {
       game: getPublicGame(room),
       seats: room.seats.map((seat) => ({
         index: seat.index,
-        player: seat.player ? getPublicPlayer(room, seat.player, viewerPlayerId) : null,
+        player: seat.player
+          ? getPublicPlayer(room, seat.player, viewerPlayerId)
+          : null,
       })),
     };
   }
@@ -727,7 +783,12 @@ export function startGameServer() {
 
   function getPublicPlayer(room, player, viewerPlayerId) {
     const role = player.roleId ? roleConfig[player.roleId] : null;
-    const canSeeRole = Boolean(role && (player.playerId === viewerPlayerId || role.isPublic || player.isRoleRevealed));
+    const canSeeRole = Boolean(
+      role &&
+      (player.playerId === viewerPlayerId ||
+        role.isPublic ||
+        player.isRoleRevealed),
+    );
 
     return {
       playerId: player.playerId,
@@ -736,18 +797,22 @@ export function startGameServer() {
       maxHealth: player.maxHealth,
       bulletSkinIndex: player.bulletSkinIndex,
       bulletSkinKey: player.bulletSkinKey,
+      hatSkinKey: player.hatSkinKey,
       connected: player.connected,
       leftGame: player.leftGame,
       isAlive: player.isAlive,
       isRoleRevealed: player.isRoleRevealed,
       handCount: player.hand?.length || 0,
-      hand: player.playerId === viewerPlayerId ? getPublicHand(room, player) : [],
+      hand:
+        player.playerId === viewerPlayerId ? getPublicHand(room, player) : [],
       messages: player.playerId === viewerPlayerId ? player.messages || [] : [],
-      role: canSeeRole ? {
-        id: role.id,
-        label: role.label,
-        team: role.team,
-      } : null,
+      role: canSeeRole
+        ? {
+            id: role.id,
+            label: role.label,
+            team: role.team,
+          }
+        : null,
     };
   }
 
@@ -760,6 +825,7 @@ export function startGameServer() {
         title: configForCard.title,
         image: configForCard.image,
         action: configForCard.action,
+        selectionView: configForCard.selectionView,
         needsTarget: configForCard.needsTarget,
         disposable: configForCard.disposable,
         effectLimitKey: configForCard.effectLimitKey,
@@ -767,16 +833,37 @@ export function startGameServer() {
         rank: configForCard.rank,
         targetMessage: configForCard.targetMessage,
         isPlayable: isCardPlayable(room, player, configForCard),
+        isBlockedByTurnRule: isCardBlockedByTurnRule(
+          room,
+          player,
+          configForCard,
+        ),
       };
     });
   }
 
   function isCardPlayable(room, player, configForCard) {
     if (room.status !== "game") return false;
-    if (!player.isAlive || room.game.turnPlayerId !== player.playerId) return false;
+    if (!player.isAlive || room.game.turnPlayerId !== player.playerId)
+      return false;
     if (!configForCard.effectLimitKey) return true;
 
-    return !room.game.turnPlayedEffects[player.playerId]?.[configForCard.effectLimitKey];
+    return !room.game.turnPlayedEffects[player.playerId]?.[
+      configForCard.effectLimitKey
+    ];
+  }
+
+  function isCardBlockedByTurnRule(room, player, configForCard) {
+    if (room.status !== "game") return false;
+    if (!player.isAlive || room.game.turnPlayerId !== player.playerId)
+      return false;
+    if (!configForCard.effectLimitKey) return false;
+
+    return Boolean(
+      room.game.turnPlayedEffects[player.playerId]?.[
+        configForCard.effectLimitKey
+      ],
+    );
   }
 
   function getPublicRooms() {
@@ -812,15 +899,26 @@ export function startGameServer() {
   }
 
   function findRoomByPlayerId(playerId) {
-    return Array.from(rooms.values()).find((room) => findSeatIndexByPlayerId(room, playerId) !== null) || null;
+    return (
+      Array.from(rooms.values()).find(
+        (room) => findSeatIndexByPlayerId(room, playerId) !== null,
+      ) || null
+    );
   }
 
   function findHostedRoomByPlayerId(playerId) {
-    return Array.from(rooms.values()).find((room) => room.status === "lobby" && room.hostPlayerId === playerId) || null;
+    return (
+      Array.from(rooms.values()).find(
+        (room) => room.status === "lobby" && room.hostPlayerId === playerId,
+      ) || null
+    );
   }
 
   function findSeatIndexByPlayerId(room, playerId) {
-    const seat = room.seats.find((candidate) => candidate.player?.playerId === playerId && !candidate.player.leftGame);
+    const seat = room.seats.find(
+      (candidate) =>
+        candidate.player?.playerId === playerId && !candidate.player.leftGame,
+    );
 
     return seat ? seat.index : null;
   }
@@ -849,6 +947,11 @@ export function startGameServer() {
       .filter((seat) => seat.player)
       .map((seat) => seat.player);
     const roles = shuffle(getRolesForPlayerCount(players.length));
+    const hatSkinKeys = shuffle(
+      Array.from({ length: config.hatSkinCount }, (_, index) =>
+        String(index + 1),
+      ),
+    );
 
     players.forEach((player, index) => {
       player.roleId = roles[index];
@@ -865,9 +968,11 @@ export function startGameServer() {
         player.maxHealth += 1;
         player.health += 1;
         player.bulletSkinKey = "sheriff";
+        player.hatSkinKey = "sheriff";
         room.game.turnPlayerId = player.playerId;
       } else {
         player.bulletSkinKey = "default";
+        player.hatSkinKey = hatSkinKeys.pop() || "1";
       }
     });
 
@@ -878,7 +983,10 @@ export function startGameServer() {
     room.game.discard = [];
     room.game.turnPlayedEffects = {};
     dealInitialHands(room);
-    addGameEvent(room, "Роли розданы. Шериф ходит первым.");
+    addGameEvent(
+      room,
+      "Игроки получили свои роли случайным образом. Шериф ходит первым.",
+    );
   }
 
   function dealInitialHands(room) {
@@ -895,10 +1003,25 @@ export function startGameServer() {
     room.game.turnPlayerId = playerId;
     room.game.turnPlayedEffects[playerId] = {};
     drawCards(room, playerId, 2);
+
+    const player = room.seats.find(
+      (seat) => seat.player?.playerId === playerId,
+    )?.player;
+
+    if (player) {
+      addGameEvent(room, {
+        type: "turn",
+        text: `Ход ${player.name}`,
+        playerName: player.name,
+        playerRoleId: player.roleId,
+      });
+    }
   }
 
   function drawCards(room, playerId, count) {
-    const player = room.seats.find((seat) => seat.player?.playerId === playerId)?.player;
+    const player = room.seats.find(
+      (seat) => seat.player?.playerId === playerId,
+    )?.player;
     const drawnCards = [];
 
     if (!player) return;
@@ -913,19 +1036,13 @@ export function startGameServer() {
       drawnCards.push(card);
     }
 
-    player.hand = [
-      ...drawnCards,
-      ...player.hand,
-    ];
+    player.hand = [...drawnCards, ...player.hand];
   }
 
   function refillDeckIfNeeded(room) {
     if (room.game.deck.length >= 7 || room.game.discard.length === 0) return;
 
-    room.game.deck = [
-      ...room.game.deck,
-      ...shuffle(room.game.discard),
-    ];
+    room.game.deck = [...room.game.deck, ...shuffle(room.game.discard)];
     room.game.discard = [];
     addGameEvent(room, "Сброс перемешан и ушел под колоду.");
   }
@@ -941,6 +1058,14 @@ export function startGameServer() {
     ].slice(0, 5);
   }
 
+  function getCardTitle(card) {
+    return cardConfig[card.cardId]?.title || "неизвестно";
+  }
+
+  function getCardEventColor(card) {
+    return cardConfig[card.cardId]?.eventColor || "#c94a35";
+  }
+
   function formatTargetMessage(configForCard, actor) {
     return (configForCard.targetMessage || "")
       .replace("{actor}", actor.name)
@@ -953,18 +1078,29 @@ export function startGameServer() {
     player.isAlive = false;
     player.isRoleRevealed = true;
 
-    const role = roleConfig[player.roleId];
-
-    addGameEvent(room, `${player.name} выбыл. Роль: ${role?.label || "неизвестно"}.`);
+    addDeathEvent(room, player);
 
     if (player.roleId === "outlaw") {
       addGameEvent(room, `За убийство бандита положен бонус: ${player.name}.`);
     }
   }
 
+  function addDeathEvent(room, player) {
+    const role = roleConfig[player.roleId];
+
+    addGameEvent(room, {
+      type: "death",
+      playerName: player.name,
+      playerRoleId: player.roleId,
+      roleLabel: role?.label || "неизвестно",
+    });
+  }
+
   function checkVictory(room) {
     const alivePlayers = getAlivePlayers(room);
-    const sheriff = room.seats.find((seat) => seat.player?.roleId === "sheriff")?.player || null;
+    const sheriff =
+      room.seats.find((seat) => seat.player?.roleId === "sheriff")?.player ||
+      null;
 
     if (room.game.winner || !sheriff) return;
 
@@ -974,14 +1110,24 @@ export function startGameServer() {
     }
 
     if (alivePlayers.length === 1 && alivePlayers[0].roleId === "renegade") {
-      finishGame(room, "renegade", "Ренегат победил: он остался единственным выжившим.");
+      finishGame(
+        room,
+        "renegade",
+        "Ренегат победил: он остался единственным выжившим.",
+      );
       return;
     }
 
-    const hasEnemyOfSheriff = alivePlayers.some((player) => player.roleId === "outlaw" || player.roleId === "renegade");
+    const hasEnemyOfSheriff = alivePlayers.some(
+      (player) => player.roleId === "outlaw" || player.roleId === "renegade",
+    );
 
     if (!hasEnemyOfSheriff) {
-      finishGame(room, "law", "Шериф и помощники победили: все бандиты и ренегаты убиты.");
+      finishGame(
+        room,
+        "law",
+        "Шериф и помощники победили: все бандиты и ренегаты убиты.",
+      );
     }
   }
 
@@ -1020,14 +1166,18 @@ export function startGameServer() {
     return null;
   }
 
-  function addGameEvent(room, text) {
+  function addGameEvent(room, event) {
+    const normalizedEvent =
+      typeof event === "string" ? { type: "text", text: event } : event;
+
     room.game.events = [
-      ...room.game.events.slice(-4),
+      ...room.game.events,
       {
         id: randomUUID(),
-        text,
+        createdAt: Date.now(),
+        ...normalizedEvent,
       },
-    ];
+    ].slice(-10);
   }
 
   function shuffle(items) {
@@ -1064,7 +1214,11 @@ export function startGameServer() {
       const currentRoom = rooms.get(roomId);
 
       if (!currentRoom) return;
-      if (currentRoom.status !== "game" && getSeatedPlayersCount(currentRoom) === 0 && !hasConnectedClientInRoom(roomId)) {
+      if (
+        currentRoom.status !== "game" &&
+        getSeatedPlayersCount(currentRoom) === 0 &&
+        !hasConnectedClientInRoom(roomId)
+      ) {
         deleteRoom(roomId);
       }
     }, config.emptyRoomGraceMs);
@@ -1099,11 +1253,15 @@ export function startGameServer() {
   }
 
   function hasConnectedClient(playerId) {
-    return Array.from(clients.values()).some((client) => client.playerId === playerId);
+    return Array.from(clients.values()).some(
+      (client) => client.playerId === playerId,
+    );
   }
 
   function hasConnectedClientInRoom(roomId) {
-    return Array.from(clients.values()).some((client) => client.roomId === roomId);
+    return Array.from(clients.values()).some(
+      (client) => client.roomId === roomId,
+    );
   }
 
   function broadcastRoom(roomId) {
@@ -1113,7 +1271,9 @@ export function startGameServer() {
 
     clients.forEach((client) => {
       if (client.roomId === roomId) {
-        send(client.socket, "room:update", { room: getPublicRoom(room, client.playerId) });
+        send(client.socket, "room:update", {
+          room: getPublicRoom(room, client.playerId),
+        });
       }
     });
   }
@@ -1138,7 +1298,9 @@ export function startGameServer() {
 
   function canCreateRoom(ip) {
     const now = Date.now();
-    const attempts = (roomCreateAttempts.get(ip) || []).filter((timestamp) => now - timestamp < config.roomCreateWindowMs);
+    const attempts = (roomCreateAttempts.get(ip) || []).filter(
+      (timestamp) => now - timestamp < config.roomCreateWindowMs,
+    );
 
     if (attempts.length >= config.maxRoomCreatesPerWindow) {
       roomCreateAttempts.set(ip, attempts);
@@ -1155,5 +1317,7 @@ export function startGameServer() {
     return Math.floor(Math.random() * config.bulletSkinCount);
   }
 
-  console.log(`Bang WebSocket server is running on ws://localhost:${config.port}`);
+  console.log(
+    `Bang WebSocket server is running on ws://localhost:${config.port}`,
+  );
 }

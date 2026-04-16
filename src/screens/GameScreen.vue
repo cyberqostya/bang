@@ -1,17 +1,22 @@
 ﻿<script setup>
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
 import BulletStack from "../components/BulletStack.vue";
+import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
 import RoleCardButton from "../components/RoleCardButton.vue";
 import { useRoomStore } from "../stores/roomStore.js";
+import { formatCardsCount } from "../utils/wordForms.js";
 
 const roomStore = useRoomStore();
 const viewMode = ref("cards");
+const eventFeedElement = ref(null);
+const isApplyingCardOnPlayers = ref(false);
 const isEndTurnDialogOpen = ref(false);
 const isLeaveGameDialogOpen = ref(false);
+const isTurnNoticeOpen = ref(false);
 const endTurnDialogMode = ref("confirm");
 const finishDelayLeft = ref(0);
 const turnPlayerName = computed(
@@ -20,7 +25,14 @@ const turnPlayerName = computed(
       (player) => player.playerId === roomStore.room.game?.turnPlayerId,
     )?.name || "",
 );
-const playerMessages = computed(() => roomStore.ownPlayer?.messages || []);
+const gameEvents = computed(() => roomStore.room.game?.events || []);
+const cardsToDiscardCount = computed(() =>
+  Math.max(0, roomStore.ownHand.length - (roomStore.ownPlayer?.health || 0)),
+);
+const discardCardsMessage = computed(
+  () => `Сбросьте ${formatCardsCount(cardsToDiscardCount.value)}`,
+);
+const currentTurnPlayerId = computed(() => roomStore.room.game?.turnPlayerId || "");
 const canFinishGameRoom = computed(
   () => Boolean(roomStore.room.game?.winnerText) && finishDelayLeft.value === 0,
 );
@@ -49,8 +61,63 @@ watch(
   },
 );
 
+watch(
+  () => gameEvents.value.map((event) => event.id).join(","),
+  () => scrollEventsToBottom(),
+);
+
+watch(viewMode, (mode) => {
+  if (mode === "players") {
+    scrollEventsToBottom();
+  }
+});
+
+watch(
+  () => roomStore.selectedCard?.instanceId || "",
+  () => {
+    const selectedCard = roomStore.selectedCard;
+
+    if (selectedCard?.selectionView === "players") {
+      isApplyingCardOnPlayers.value = true;
+      viewMode.value = "players";
+      return;
+    }
+
+    if (!selectedCard && isApplyingCardOnPlayers.value) {
+      isApplyingCardOnPlayers.value = false;
+      viewMode.value = "cards";
+    }
+  },
+);
+
+watch(
+  currentTurnPlayerId,
+  (turnPlayerId) => {
+    if (
+      roomStore.room.status !== "game" ||
+      roomStore.room.game?.winner ||
+      turnPlayerId !== roomStore.playerId
+    ) {
+      return;
+    }
+
+    viewMode.value = "cards";
+    roomStore.cancelSelectedCard();
+    isTurnNoticeOpen.value = true;
+  },
+  { immediate: true },
+);
+
 function toggleViewMode() {
   viewMode.value = viewMode.value === "cards" ? "players" : "cards";
+}
+
+async function scrollEventsToBottom() {
+  await nextTick();
+
+  if (eventFeedElement.value) {
+    eventFeedElement.value.scrollTop = eventFeedElement.value.scrollHeight;
+  }
 }
 
 function openLeaveGameDialog() {
@@ -59,6 +126,10 @@ function openLeaveGameDialog() {
 
 function closeLeaveGameDialog() {
   isLeaveGameDialogOpen.value = false;
+}
+
+function closeTurnNotice() {
+  isTurnNoticeOpen.value = false;
 }
 
 function confirmLeaveGame() {
@@ -108,12 +179,13 @@ function formatMessageTime(timestamp) {
   return new Intl.DateTimeFormat("ru-RU", {
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   }).format(new Date(timestamp));
 }
 </script>
 
 <template>
-  <main class="app" @click="roomStore.cancelSelectedCard">
+  <main class="app">
     <AppHeader>
       <template #left>
         <button
@@ -136,31 +208,44 @@ function formatMessageTime(timestamp) {
     </AppHeader>
 
     <section v-if="viewMode === 'players'" class="players-view">
+      <PlayZone title="События" variant="events">
+        <div
+          ref="eventFeedElement"
+          class="event-feed"
+          aria-label="События игры"
+        >
+          <p
+            v-for="event in gameEvents"
+            :key="event.id"
+            class="event-feed__message"
+            :class="{ 'event-feed__message_turn': event.type === 'turn' }"
+          >
+            <span class="event-feed__text">
+              <GameEventMessage :event="event" />
+            </span>
+            <time v-if="event.createdAt" class="event-feed__time">
+              {{ formatMessageTime(event.createdAt) }}
+            </time>
+          </p>
+        </div>
+      </PlayZone>
       <GamePlayersTable />
+      <button
+        v-if="roomStore.selectedCard?.selectionView === 'players'"
+        class="selected-action-card"
+        type="button"
+        :aria-label="`Отменить ${roomStore.selectedCard.title}`"
+        @click.stop="roomStore.cancelSelectedCard"
+      >
+        <img
+          :src="roomStore.selectedCard.image"
+          :alt="roomStore.selectedCard.title"
+        />
+        <span class="selected-action-card__cancel"></span>
+      </button>
     </section>
 
     <section v-else class="cards-view">
-      <section class="action-feed" aria-label="События игрока">
-        <p
-          v-for="message in playerMessages"
-          :key="message.id"
-          class="action-feed__message"
-        >
-          <template v-if="message.type === 'target-card'">
-            <span class="action-feed__actor">{{ message.actorName }}</span>
-            <span> применил </span>
-            <span class="action-feed__card">"{{ message.cardTitle }}"</span>
-            <span> на вас</span>
-          </template>
-          <template v-else>
-            {{ message.text }}
-          </template>
-          <span v-if="message.createdAt" class="action-feed__time">
-            ({{ formatMessageTime(message.createdAt) }})
-          </span>
-        </p>
-      </section>
-
       <PlayZone title="Стол" variant="table">
         <div class="table-main">
           <BulletStack />
@@ -198,7 +283,7 @@ function formatMessageTime(timestamp) {
         <p>
           {{
             endTurnDialogMode === "discard"
-              ? `Сбросьте лишние карты до ${roomStore.ownPlayer?.health || 0}`
+              ? discardCardsMessage
               : "Точно завершить ход?"
           }}
         </p>
@@ -221,6 +306,20 @@ function formatMessageTime(timestamp) {
             {{ endTurnDialogMode === "discard" ? "Окей" : "Да" }}
           </button>
         </div>
+      </form>
+    </div>
+
+    <div
+      v-if="isTurnNoticeOpen"
+      class="turn-notice-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Твоя очередь ходить"
+      @click.stop
+    >
+      <form class="turn-notice-dialog__form" @submit.prevent="closeTurnNotice">
+        <p>Твоя очередь ходить, {{ roomStore.ownPlayer?.name }}</p>
+        <button class="turn-notice-dialog__submit" type="submit">Окей</button>
       </form>
     </div>
 
@@ -298,54 +397,115 @@ function formatMessageTime(timestamp) {
 
 .cards-view {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 5px;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
 }
 
 .players-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 5px;
   min-width: 0;
   min-height: 0;
-  padding: 5px;
+  padding: 0 0 5px;
 }
 
-.action-feed {
+.selected-action-card {
+  position: fixed;
+  right: 15px;
+  top: 65px;
+  z-index: 15;
+  width: var(--card-width);
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: 0 12px 26px rgba(29, 29, 29, 0.28);
+  animation: selected-action-float 1800ms ease-in-out infinite;
+}
+
+.selected-action-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.selected-action-card__cancel {
+  position: absolute;
+  right: -5px;
+  top: -5px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--ink);
+  box-shadow: 0 12px 26px rgba(29, 29, 29, 0.28);
+}
+
+.selected-action-card__cancel::before,
+.selected-action-card__cancel::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--back-soft);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.selected-action-card__cancel::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+@keyframes selected-action-float {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-5px) scale(1.04);
+  }
+}
+
+.event-feed {
   display: grid;
   align-content: start;
-  gap: 3px;
-  height: calc(18px * 2.5 + 10px);
+  gap: 4px;
+  height: 100%;
   min-width: 0;
   overflow-y: auto;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  padding: 5px 8px;
-  background: rgba(243, 241, 219, 0.72);
   scrollbar-width: thin;
   scrollbar-color: rgba(94, 84, 70, 0.5) rgba(94, 84, 70, 0.12);
 }
 
-.action-feed__message {
+.event-feed__message {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
   margin: 0;
   min-width: 0;
-  color: var(--ink);
+  color: var(--muted);
   font-size: 18px;
   line-height: 1;
 }
 
-.action-feed__actor {
-  color: var(--ink);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
+.event-feed__message_turn {
+  margin-top: 15px;
+  text-align: center;
 }
 
-.action-feed__card {
-  color: var(--red);
+.event-feed__text {
+  min-width: 0;
 }
 
-.action-feed__time {
+.event-feed__time {
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .table-main {
@@ -387,6 +547,7 @@ function formatMessageTime(timestamp) {
 }
 
 .turn-dialog,
+.turn-notice-dialog,
 .leave-game-dialog,
 .result-dialog {
   position: fixed;
@@ -403,6 +564,7 @@ function formatMessageTime(timestamp) {
 }
 
 .turn-dialog__form,
+.turn-notice-dialog__form,
 .leave-game-dialog__form,
 .result-dialog__panel {
   display: grid;
@@ -415,6 +577,7 @@ function formatMessageTime(timestamp) {
 }
 
 .turn-dialog__form p,
+.turn-notice-dialog__form p,
 .leave-game-dialog__form p,
 .result-dialog__panel p {
   margin: 0;
@@ -432,6 +595,7 @@ function formatMessageTime(timestamp) {
 }
 
 .turn-dialog__actions button,
+.turn-notice-dialog__submit,
 .leave-game-dialog__actions button,
 .result-dialog__panel button {
   min-height: 44px;
@@ -451,6 +615,7 @@ function formatMessageTime(timestamp) {
 }
 
 .turn-dialog__submit,
+.turn-notice-dialog__submit,
 .leave-game-dialog__submit,
 .result-dialog__panel button {
   background: var(--gold);

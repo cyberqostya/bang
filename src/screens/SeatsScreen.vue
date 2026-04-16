@@ -269,7 +269,7 @@ function confirmCloseRoom() {
   justify-content: center;
   width: 72px;
   height: 72px;
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--muted);
   border-radius: 50%;
   background: var(--back-soft);
   color: var(--ink);
@@ -315,7 +315,6 @@ function confirmCloseRoom() {
 
 .seat_taken {
   border-radius: 6px;
-  background: var(--gold);
   height: auto;
   width: auto;
   min-width: 8ch;

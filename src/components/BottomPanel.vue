@@ -1,11 +1,12 @@
 ﻿<script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import HandCard from "./HandCard.vue";
 import PlayZone from "./PlayZone.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
 const handCards = computed(() => roomStore.ownHand);
+const previewCard = ref(null);
 
 function freezeLeavingCard(element) {
   const cardRect = element.getBoundingClientRect();
@@ -18,6 +19,19 @@ function freezeLeavingCard(element) {
   element.style.flexBasis = `${cardRect.width}px`;
   element.style.zIndex = "20";
   element.style.pointerEvents = "none";
+}
+
+function handleCardTap(card) {
+  if (roomStore.isDiscardingCards || card.isPlayable) {
+    roomStore.selectCard(card.instanceId);
+    return;
+  }
+
+  previewCard.value = card;
+}
+
+function closePreview() {
+  previewCard.value = null;
 }
 </script>
 
@@ -36,11 +50,23 @@ function freezeLeavingCard(element) {
         :key="card.instanceId"
         :card="card"
         :is-selected="roomStore.selectedCardId === card.instanceId"
-        :is-disabled="!card.isPlayable && !roomStore.isDiscardingCards"
+        :is-disabled="card.isBlockedByTurnRule && !roomStore.isDiscardingCards"
+        :can-select="card.isPlayable || roomStore.isDiscardingCards"
         :is-discarding="roomStore.isDiscardingCards"
-        @select="roomStore.selectCard"
+        @select="handleCardTap(card)"
       />
     </TransitionGroup>
+
+    <div v-if="previewCard" class="hand-preview" @click.stop="closePreview">
+      <button
+        class="hand-preview__card"
+        type="button"
+        :aria-label="previewCard.title"
+        @click.stop="closePreview"
+      >
+        <img :src="previewCard.image" :alt="previewCard.title" />
+      </button>
+    </div>
   </PlayZone>
 </template>
 
@@ -53,11 +79,10 @@ function freezeLeavingCard(element) {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  min-height: calc(var(--card-width) * var(--ratio) + 25px);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
-  padding: 15px 10px 10px;
+  padding: 5px;
   scrollbar-width: thin;
   scrollbar-color: rgba(94, 84, 70, 0.5) rgba(94, 84, 70, 0.12);
   -webkit-overflow-scrolling: touch;
@@ -119,6 +144,41 @@ function freezeLeavingCard(element) {
   100% {
     opacity: 0;
     transform: translateY(-220px) rotate(-16deg) scale(0.76);
+  }
+}
+
+.hand-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(29, 29, 29, 0.28);
+}
+
+.hand-preview__card {
+  width: min(72vw, 260px);
+  border-radius: 6px;
+  background: transparent;
+  animation: hand-preview-in 220ms ease forwards;
+}
+
+.hand-preview__card img {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 18px 36px rgba(29, 29, 29, 0.28);
+}
+
+@keyframes hand-preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.72);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 </style>

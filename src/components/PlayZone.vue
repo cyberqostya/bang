@@ -30,7 +30,6 @@ defineProps({
   width: 100%;
   min-width: 0;
   min-height: 0;
-  border-top: 1px dashed var(--line);
   background: var(--back-soft);
 }
 
@@ -63,6 +62,7 @@ defineProps({
   align-items: center;
   overflow: hidden;
   padding: 0;
+  border-top: 1px dashed var(--line);
 }
 
 .play-zone_table .play-zone__content {
@@ -70,5 +70,15 @@ defineProps({
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 10px;
   overflow: visible;
+}
+
+.play-zone_events {
+  height: calc(18px * 5 + 36px);
+}
+
+.play-zone_events .play-zone__content {
+  overflow: hidden;
+  border-bottom: 1px dashed var(--line);
+  padding-top: 20px;
 }
 </style>

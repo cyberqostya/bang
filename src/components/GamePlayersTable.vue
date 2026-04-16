@@ -5,24 +5,42 @@ import { useRoomStore } from "../stores/roomStore.js";
 const roomStore = useRoomStore();
 
 const seats = computed(() =>
-  roomStore.room.seats.map((seat) => ({
-    ...seat,
-    isOwn: seat.player?.playerId === roomStore.playerId,
-    isTargetable: Boolean(
-      roomStore.selectedCard?.needsTarget &&
+  roomStore.room.seats
+    .filter((seat) => seat.player)
+    .map((seat) => ({
+      ...seat,
+      isOwn: seat.player?.playerId === roomStore.playerId,
+      isTargetable: Boolean(
+        roomStore.selectedCard?.needsTarget &&
         roomStore.selectedCard?.isPlayable &&
-        seat.player &&
         seat.player.playerId !== roomStore.playerId &&
         seat.player.isAlive,
-    ),
-  })),
+      ),
+    })),
 );
+const turnPlayer = computed(
+  () =>
+    seats.value.find(
+      (seat) => seat.player.playerId === roomStore.room.game?.turnPlayerId,
+    )?.player || null,
+);
+const turnPlayerLabel = computed(() => {
+  if (!turnPlayer.value) return "игровой стол";
+
+  const rolePrefix = turnPlayer.value.role?.id === "sheriff" ? "шериф " : "";
+
+  return `сейчас ходит ${rolePrefix}${turnPlayer.value.name}`;
+});
+
+function getHatImage(player) {
+  return `/images/hats/${player.hatSkinKey || "1"}.webp`;
+}
 </script>
 
 <template>
   <section class="game-players-table" aria-label="Игроки за столом">
     <div class="game-players-table__oval">
-      <span>Игровой стол</span>
+      <span>{{ turnPlayerLabel }}</span>
     </div>
 
     <button
@@ -42,7 +60,13 @@ const seats = computed(() =>
       :disabled="!seat.isTargetable"
       @click.stop="roomStore.useSelectedCard(seat.player.playerId)"
     >
-      <span v-if="seat.player">{{ seat.player.name }}</span>
+      <img
+        class="game-seat__hat"
+        :class="{ 'game-seat__hat_13': seat.player.hatSkinKey === '13' }"
+        :src="getHatImage(seat.player)"
+        alt=""
+      />
+      <span class="game-seat__name">{{ seat.player.name }}</span>
     </button>
   </section>
 </template>
@@ -82,13 +106,13 @@ const seats = computed(() =>
 .game-seat {
   position: absolute;
   display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
-  border: 1px dashed var(--line);
-  border-radius: 50%;
-  background: var(--back-soft);
-  color: var(--muted);
+  justify-items: center;
+  gap: 1px;
+  width: 80px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
   font-size: 24px;
   line-height: 1;
   text-align: center;
@@ -96,43 +120,49 @@ const seats = computed(() =>
 
 .game-seat:disabled {
   cursor: default;
-  opacity: 1;
 }
 
 .game-seat_taken {
-  width: auto;
-  height: auto;
-  min-width: 8ch;
-  min-height: 1.5em;
-  border: 0;
-  border-radius: 6px;
-  padding-inline: 5px;
-  background: var(--gold);
-  color: var(--ink);
+  background: transparent;
 }
 
 .game-seat_own {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
+  outline: 0;
 }
 
 .game-seat_targetable {
-  box-shadow:
-    0 0 0 2px rgba(240, 160, 32, 0.36),
-    0 0 18px rgba(201, 74, 53, 0.24);
   animation: target-seat-pulse 920ms ease-in-out infinite;
 }
 
 .game-seat_dead {
-  opacity: 0.42;
+  opacity: 0.32;
 }
 
-.game-seat span {
+.game-seat__hat {
+  display: block;
+  width: 64px;
+  height: auto;
+  margin-bottom: -6px;
+  pointer-events: none;
+  position: relative;
+}
+
+.game-seat__hat_13 {
+  margin-bottom: -18px;
+}
+
+.game-seat__name {
   overflow: hidden;
   max-width: 12ch;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.game-seat_own .game-seat__name {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .game-seat_1 {
@@ -179,6 +209,13 @@ const seats = computed(() =>
   left: 8%;
 }
 
+.game-seat_5 .game-seat__hat,
+.game-seat_6 .game-seat__hat,
+.game-seat_7 .game-seat__hat,
+.game-seat_8 .game-seat__hat {
+  transform: scaleX(-1);
+}
+
 @keyframes target-seat-pulse {
   0%,
   100% {
@@ -186,7 +223,7 @@ const seats = computed(() =>
   }
 
   50% {
-    filter: brightness(1.12);
+    filter: brightness(1.14) drop-shadow(0 0 10px rgba(201, 74, 53, 0.34));
   }
 }
 </style>
