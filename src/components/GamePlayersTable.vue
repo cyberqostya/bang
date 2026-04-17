@@ -5,6 +5,13 @@ import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
 
+const aliveSeatIndexes = computed(() =>
+  roomStore.room.seats
+    .filter((seat) => seat.player?.isAlive && !seat.player.leftGame)
+    .map((seat) => seat.index)
+    .sort((first, second) => first - second),
+);
+
 const seats = computed(() =>
   roomStore.room.seats
     .filter((seat) => seat.player)
@@ -16,7 +23,8 @@ const seats = computed(() =>
         roomStore.selectedCard?.needsTarget &&
         roomStore.selectedCard?.isPlayable &&
         seat.player.playerId !== roomStore.playerId &&
-        seat.player.isAlive,
+        seat.player.isAlive &&
+        isTargetInSelectedCardRange(seat),
       ),
     })),
 );
@@ -52,6 +60,35 @@ function getBulletImage(player) {
 function isSheriff(player) {
   return player.role?.id === "sheriff";
 }
+
+function isTargetInSelectedCardRange(seat) {
+  if (!roomStore.selectedCard?.usesWeaponRange) return true;
+
+  const distance = getDistanceFromOwnSeat(seat.index);
+
+  return distance > 0 && distance <= (roomStore.ownPlayer?.attackRange || 1);
+}
+
+function getDistanceFromOwnSeat(targetSeatIndex) {
+  const ownSeatIndex = roomStore.ownPlayer?.seatIndex;
+  const ownPosition = aliveSeatIndexes.value.indexOf(ownSeatIndex);
+  const targetPosition = aliveSeatIndexes.value.indexOf(targetSeatIndex);
+
+  if (
+    ownPosition === -1 ||
+    targetPosition === -1 ||
+    ownPosition === targetPosition
+  ) {
+    return 0;
+  }
+
+  const directDistance = Math.abs(ownPosition - targetPosition);
+
+  return Math.min(
+    directDistance,
+    aliveSeatIndexes.value.length - directDistance,
+  );
+}
 </script>
 
 <template>
@@ -79,17 +116,21 @@ function isSheriff(player) {
       @click.stop="roomStore.useSelectedCard(seat.player.playerId)"
     >
       <span
-        v-if="seat.player.health > 0"
+        v-if="seat.player.isAlive"
         class="game-seat__statuses"
         aria-hidden="true"
       >
-        <span class="game-seat__health">
+        <span v-if="seat.isOwn" class="game-seat__own-marker">Я</span>
+        <span v-if="seat.player.health > 0" class="game-seat__health">
           <img
             v-for="point in seat.player.health"
             :key="point"
             :src="getBulletImage(seat.player)"
             alt=""
           />
+        </span>
+        <span class="game-seat__range">
+          <span>{{ seat.player.attackRange || 1 }}</span>
         </span>
       </span>
       <span
@@ -109,7 +150,6 @@ function isSheriff(player) {
             Шериф
           </span>
           <span class="game-seat__name">{{ seat.player.name }}</span>
-          <span v-if="seat.isOwn" class="game-seat__own-marker">Я</span>
         </span>
       </span>
     </button>
@@ -177,6 +217,7 @@ function isSheriff(player) {
 
 .game-seat__player {
   position: relative;
+  z-index: 2;
   display: grid;
   justify-items: center;
   gap: 1px;
@@ -188,8 +229,8 @@ function isSheriff(player) {
 
 .game-seat__own-marker {
   position: absolute;
-  left: -9px;
-  bottom: -6px;
+  left: 50%;
+  top: 50%;
   z-index: 2;
   display: grid;
   place-items: center;
@@ -197,26 +238,34 @@ function isSheriff(player) {
   height: 18px;
   border-radius: 5px;
   background: var(--gold);
-  box-shadow:
-    0 0 0 1px rgba(29, 29, 29, 0.16),
-    0 2px 5px rgba(29, 29, 29, 0.18);
+  filter: drop-shadow(0 2px 3px rgba(29, 29, 29, 0.22));
   color: var(--ink);
   font-size: 16px;
   line-height: 1;
-  transform: rotate(-7deg);
+  transform: translate(-50%, -50%) rotate(-7deg);
 }
 
 .game-seat__statuses {
+  --status-radius: 50px;
+  --status-diagonal: calc(var(--status-radius) * 0.707);
   position: absolute;
-  display: grid;
-  place-items: center;
+  left: 50%;
+  top: 42%;
+  z-index: 1;
+  width: calc(var(--status-radius) * 2 + 18px);
+  height: calc(var(--status-radius) * 2 + 18px);
   pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 
 .game-seat__health {
+  position: absolute;
+  left: 50%;
+  top: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  transform: translate(-50%, -50%);
 }
 
 .game-seat__health img {
@@ -228,6 +277,54 @@ function isSheriff(player) {
 
 .game-seat__health img + img {
   margin-left: -9px;
+}
+
+.game-seat__range {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #5e5446;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.game-seat__range::before,
+.game-seat__range::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  background: #b4ab9d;
+  transform: translate(-50%, -50%);
+}
+
+.game-seat__range::before {
+  width: 130%;
+  height: 1px;
+}
+
+.game-seat__range::after {
+  width: 1px;
+  height: 130%;
+}
+
+.game-seat__range span {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .game-seat__reticle {
@@ -307,9 +404,31 @@ function isSheriff(player) {
 }
 
 .game-seat_1 .game-seat__statuses {
-  left: 50%;
-  top: calc(100% + 1px);
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_1 .game-seat__health {
+  transform: translate(-50%, -50%) translate(0, var(--status-radius));
+}
+
+.game-seat_1 .game-seat__own-marker {
+  transform: translate(-50%, -50%) translate(0, var(--status-radius))
+    rotate(-7deg);
+}
+
+.game-seat_1 .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
+}
+
+.game-seat_1.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
+}
+
+.game-seat_1.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), var(--status-diagonal));
 }
 
 .game-seat_2 {
@@ -318,9 +437,30 @@ function isSheriff(player) {
 }
 
 .game-seat_2 .game-seat__statuses {
-  left: -5px;
-  top: calc(100% - 8px);
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_2 .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
+}
+
+.game-seat_2 .game-seat__own-marker {
+  transform: translate(-50%, -50%)
+    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal))
+    rotate(-7deg);
+}
+
+.game-seat_2 .game-seat__range {
+  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
+}
+
+.game-seat_2.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
+}
+
+.game-seat_2.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%) translate(0, var(--status-radius));
 }
 
 .game-seat_3 {
@@ -330,9 +470,37 @@ function isSheriff(player) {
 }
 
 .game-seat_3 .game-seat__statuses {
-  right: calc(100% - 8px);
-  top: 50%;
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_3 .game-seat__health {
+  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
+}
+
+.game-seat_3 .game-seat__own-marker {
+  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0)
+    rotate(-7deg);
+}
+
+.game-seat_3 .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(
+      calc(var(--status-diagonal) * -1),
+      calc(var(--status-diagonal) * -1)
+    );
+}
+
+.game-seat_3.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(
+      calc(var(--status-diagonal) * -1),
+      calc(var(--status-diagonal) * -1)
+    );
+}
+
+.game-seat_3.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
 }
 
 .game-seat_4 {
@@ -341,9 +509,36 @@ function isSheriff(player) {
 }
 
 .game-seat_4 .game-seat__statuses {
-  left: -5px;
-  bottom: calc(100% - 8px);
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_4 .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(
+      calc(var(--status-diagonal) * -1),
+      calc(var(--status-diagonal) * -1)
+    );
+}
+
+.game-seat_4 .game-seat__own-marker {
+  transform: translate(-50%, -50%)
+    translate(
+      calc(var(--status-diagonal) * -1),
+      calc(var(--status-diagonal) * -1)
+    )
+    rotate(-7deg);
+}
+
+.game-seat_4 .game-seat__range {
+  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
+}
+
+.game-seat_4.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
+}
+
+.game-seat_4.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
 }
 
 .game-seat_5 {
@@ -353,9 +548,34 @@ function isSheriff(player) {
 }
 
 .game-seat_5 .game-seat__statuses {
-  left: 50%;
-  bottom: calc(100% + 1px);
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_5 .game-seat__health {
+  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
+}
+
+.game-seat_5 .game-seat__own-marker {
+  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1))
+    rotate(-7deg);
+}
+
+.game-seat_5 .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
+}
+
+.game-seat_5.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
+}
+
+.game-seat_5.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(
+      calc(var(--status-diagonal) * -1),
+      calc(var(--status-diagonal) * -1)
+    );
 }
 
 .game-seat_6 {
@@ -364,9 +584,30 @@ function isSheriff(player) {
 }
 
 .game-seat_6 .game-seat__statuses {
-  right: -5px;
-  bottom: calc(100% - 8px);
-  transform: translateX(50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_6 .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
+}
+
+.game-seat_6 .game-seat__own-marker {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1))
+    rotate(-7deg);
+}
+
+.game-seat_6 .game-seat__range {
+  transform: translate(-50%, -50%) translate(var(--status-radius), 0);
+}
+
+.game-seat_6.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%) translate(var(--status-radius), 0);
+}
+
+.game-seat_6.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
 }
 
 .game-seat_7 {
@@ -376,9 +617,31 @@ function isSheriff(player) {
 }
 
 .game-seat_7 .game-seat__statuses {
-  left: calc(100% - 8px);
-  top: 50%;
-  transform: translateY(-50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_7 .game-seat__health {
+  transform: translate(-50%, -50%) translate(var(--status-radius), 0);
+}
+
+.game-seat_7 .game-seat__own-marker {
+  transform: translate(-50%, -50%) translate(var(--status-radius), 0)
+    rotate(-7deg);
+}
+
+.game-seat_7 .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), var(--status-diagonal));
+}
+
+.game-seat_7.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), var(--status-diagonal));
+}
+
+.game-seat_7.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
 }
 
 .game-seat_8 {
@@ -387,9 +650,29 @@ function isSheriff(player) {
 }
 
 .game-seat_8 .game-seat__statuses {
-  right: -5px;
-  top: calc(100% - 8px);
-  transform: translateX(50%);
+  transform: translate(-50%, -50%);
+}
+
+.game-seat_8 .game-seat__health {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), var(--status-diagonal));
+}
+
+.game-seat_8 .game-seat__own-marker {
+  transform: translate(-50%, -50%)
+    translate(var(--status-diagonal), var(--status-diagonal)) rotate(-7deg);
+}
+
+.game-seat_8 .game-seat__range {
+  transform: translate(-50%, -50%) translate(0, var(--status-radius));
+}
+
+.game-seat_8.game-seat_own .game-seat__health {
+  transform: translate(-50%, -50%) translate(0, var(--status-radius));
+}
+
+.game-seat_8.game-seat_own .game-seat__range {
+  transform: translate(-50%, -50%) translate(var(--status-radius), 0);
 }
 
 .game-seat_5 .game-seat__hat,

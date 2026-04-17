@@ -2,6 +2,7 @@
   port: Number(process.env.PORT || 3001),
   seatCount: 8,
   defaultHealth: 4,
+  defaultAttackRange: 1,
   bulletSkinCount: 10,
   hatSkinCount: 13,
   maxRoomNameLength: 15,
@@ -10,7 +11,7 @@
   maxActiveRooms: 100,
   maxRoomCreatesPerWindow: 5,
   roomCreateWindowMs: 10 * 60 * 1000,
-  playerDisconnectGraceMs: 40 * 60 * 1000,
+  playerDisconnectGraceMs: 5 * 60 * 1000,
   emptyRoomGraceMs: 40 * 60 * 1000,
   gameTtlMs: 5 * 60 * 60 * 1000,
 };

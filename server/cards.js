@@ -1,12 +1,14 @@
-﻿export const cardConfig = {
+export const cardConfig = {
   bang: {
     id: "bang",
     title: "BANG",
     image: "/images/cards/bang.webp",
+    playMode: "instant",
     eventColor: "#c94a35",
     action: "bang",
     selectionView: "players",
     needsTarget: true,
+    usesWeaponRange: true,
     disposable: true,
     effectLimitKey: "bang",
   },

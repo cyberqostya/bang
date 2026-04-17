@@ -370,6 +370,7 @@ export function startGameServer() {
       name,
       health: config.defaultHealth,
       maxHealth: config.defaultHealth,
+      attackRange: config.defaultAttackRange,
       bulletSkinIndex: getRandomBulletSkinIndex(),
       bulletSkinKey: "default",
       hatSkinKey: null,
@@ -631,6 +632,17 @@ export function startGameServer() {
       return false;
     }
 
+    const distance = getPlayerDistance(room, client.playerId, targetPlayerId);
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const attackRange = actor?.attackRange ?? config.defaultAttackRange;
+
+    if (!distance || distance > attackRange) {
+      sendError(client.socket, "Цель слишком далеко");
+      return false;
+    }
+
     targetPlayer.health = Math.max(0, targetPlayer.health - 1);
     return { targetPlayer };
   }
@@ -713,7 +725,22 @@ export function startGameServer() {
 
     const timer = setTimeout(() => {
       disconnectTimers.delete(playerId);
-      leaveSeat(room.id, playerId);
+
+      if (room.status === "game") {
+        const player = room.seats[seatIndex]?.player;
+
+        if (player?.isAlive) {
+          addGameEvent(
+            room,
+            `Игрок ${player.name} не вернулся в игру за 5 минут.`,
+          );
+        }
+
+        leaveGame(room, playerId);
+      } else {
+        leaveSeat(room.id, playerId);
+      }
+
       broadcastRoom(room.id);
       broadcastRoomList();
     }, config.playerDisconnectGraceMs);
@@ -794,6 +821,7 @@ export function startGameServer() {
       name: player.name,
       health: player.health,
       maxHealth: player.maxHealth,
+      attackRange: player.attackRange,
       bulletSkinIndex: player.bulletSkinIndex,
       bulletSkinKey: player.bulletSkinKey,
       hatSkinKey: player.hatSkinKey,
@@ -822,9 +850,11 @@ export function startGameServer() {
         ...card,
         title: configForCard.title,
         image: configForCard.image,
+        playMode: configForCard.playMode,
         action: configForCard.action,
         selectionView: configForCard.selectionView,
         needsTarget: configForCard.needsTarget,
+        usesWeaponRange: configForCard.usesWeaponRange,
         disposable: configForCard.disposable,
         effectLimitKey: configForCard.effectLimitKey,
         suit: card.suit,
@@ -920,6 +950,29 @@ export function startGameServer() {
     return seat ? seat.index : null;
   }
 
+  function getPlayerDistance(room, fromPlayerId, toPlayerId) {
+    const aliveSeatIndexes = room.seats
+      .filter((seat) => seat.player?.isAlive && !seat.player.leftGame)
+      .map((seat) => seat.index)
+      .sort((first, second) => first - second);
+    const fromSeatIndex = findSeatIndexByPlayerId(room, fromPlayerId);
+    const toSeatIndex = findSeatIndexByPlayerId(room, toPlayerId);
+    const fromPosition = aliveSeatIndexes.indexOf(fromSeatIndex);
+    const toPosition = aliveSeatIndexes.indexOf(toSeatIndex);
+
+    if (
+      fromPosition === -1 ||
+      toPosition === -1 ||
+      fromPosition === toPosition
+    ) {
+      return 0;
+    }
+
+    const directDistance = Math.abs(fromPosition - toPosition);
+
+    return Math.min(directDistance, aliveSeatIndexes.length - directDistance);
+  }
+
   function createEmptySeats() {
     return Array.from({ length: config.seatCount }, (_, index) => ({
       index,
@@ -958,6 +1011,7 @@ export function startGameServer() {
       player.connected = true;
       player.health = config.defaultHealth;
       player.maxHealth = config.defaultHealth;
+      player.attackRange = config.defaultAttackRange;
       player.hand = [];
 
       if (player.roleId === "sheriff") {

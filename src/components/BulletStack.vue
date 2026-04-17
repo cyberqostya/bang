@@ -119,7 +119,7 @@ async function updateBulletMetrics() {
 .bullets {
   position: relative;
   display: flex;
-  width: 50%;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: visible;
 }
@@ -128,7 +128,7 @@ async function updateBulletMetrics() {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: var(--card-width);
+  width: calc(var(--card-width) * 0.75);
   background: transparent;
 }
 

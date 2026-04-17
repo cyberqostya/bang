@@ -5,10 +5,12 @@ import AppScreen from "../components/AppScreen.vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
 import BulletStack from "../components/BulletStack.vue";
+import CharacterSlot from "../components/CharacterSlot.vue";
 import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
 import GameCardVisual from "../components/GameCardVisual.vue";
 import RoleCardButton from "../components/RoleCardButton.vue";
+import WeaponSlot from "../components/WeaponSlot.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 import { formatCardsCount } from "../utils/wordForms.js";
 
@@ -250,7 +252,11 @@ function formatMessageTime(timestamp) {
       <PlayZone title="Стол" variant="table">
         <div class="table-main">
           <BulletStack />
-          <RoleCardButton />
+          <div class="table-cards">
+            <CharacterSlot />
+            <WeaponSlot />
+            <RoleCardButton />
+          </div>
         </div>
         <div v-if="roomStore.room.status === 'game'" class="turn-row">
           <button
@@ -530,6 +536,13 @@ function formatMessageTime(timestamp) {
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
+}
+
+.table-cards {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
 }
 
 .turn-row {
