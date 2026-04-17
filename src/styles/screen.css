@@ -1,11 +1,33 @@
 @font-face {
-  font-family: "Heffer";
-  src: url("/fonts/HefferCyr.woff2") format("woff2");
+  font-family: "TTRationalist";
+  src: url("/fonts/TTRationalist-Regular.woff2") format("woff2");
   font-display: swap;
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: "TTRationalist";
+  src: url("/fonts/TTRationalist-Md.woff2") format("woff2");
+  font-display: swap;
+  font-weight: 500;
+}
+
+@font-face {
+  font-family: "TTRationalist";
+  src: url("/fonts/TTRationalist-DmBd.woff2") format("woff2");
+  font-display: swap;
+  font-weight: 600;
+}
+
+@font-face {
+  font-family: "TTRationalist";
+  src: url("/fonts/TTRationalist-Bd.woff2") format("woff2");
+  font-display: swap;
+  font-weight: 700;
 }
 
 :root {
-  --font-main: "Heffer";
+  --font-main: "TTRationalist";
   --page-back: #f3f1db;
   --back: #ebe5d0;
   --back-soft: #f3f1db;
@@ -36,6 +58,7 @@ body,
   overscroll-behavior: none;
   color: var(--ink);
   font-family: var(--font-main);
+  background: var(--page-back);
 }
 
 span,
@@ -95,20 +118,4 @@ img {
   display: block;
   width: 100%;
   pointer-events: none;
-}
-
-.app {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(100%, 600px);
-  height: 100dvh;
-  margin-inline: auto;
-  overflow: hidden;
-  background: var(--page-back);
-}
-
-.app > * {
-  min-width: 0;
 }

@@ -1,4 +1,6 @@
 <script setup>
+import GameCardVisual from "./GameCardVisual.vue";
+
 defineProps({
   card: {
     type: Object,
@@ -38,8 +40,7 @@ defineEmits(["select"]);
     :aria-disabled="!canSelect"
     @click.stop="$emit('select', card.instanceId)"
   >
-    <img :src="card.image" :alt="card.title" />
-    <span class="hand-card__number">{{ card.deckNumber }}</span>
+    <GameCardVisual :card="card" />
     <span v-if="isDiscarding" class="hand-card__discard-mark"></span>
   </button>
 </template>
@@ -56,29 +57,6 @@ defineEmits(["select"]);
   transition:
     box-shadow 160ms ease,
     transform 160ms ease;
-}
-
-.hand-card img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 5px;
-  object-fit: contain;
-}
-
-.hand-card__number {
-  position: absolute;
-  right: 5px;
-  top: 5px;
-  display: grid;
-  place-items: center;
-  min-width: 24px;
-  min-height: 24px;
-  border-radius: 999px;
-  background: rgba(29, 29, 29, 0.68);
-  color: var(--back);
-  font-size: 16px;
-  line-height: 1;
 }
 
 .hand-card_selected {
@@ -104,10 +82,6 @@ defineEmits(["select"]);
 
 .hand-card_discarding.hand-card-leave-active {
   animation: hand-card-fly-away 420ms ease forwards;
-}
-
-.hand-card_discarding .hand-card__number {
-  display: none;
 }
 
 .hand-card__discard-mark {

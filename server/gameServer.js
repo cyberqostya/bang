@@ -9,7 +9,7 @@ import {
   normalizeRoomName,
   parseMessage,
 } from "./utils.js";
-import { cardConfig, createTestDeck } from "./cards.js";
+import { cardConfig, createDeck } from "./cards.js";
 import { getRolesForPlayerCount, roleConfig } from "./roles.js";
 
 export function startGameServer() {
@@ -350,7 +350,7 @@ export function startGameServer() {
     }
 
     const seatIndex = Number(payload.seatIndex);
-    const name = normalizeName(payload.name);
+    const name = normalizeName(payload.name, config.maxPlayerNameLength);
     const seat = room.seats[seatIndex];
 
     if (!seat || !name) {
@@ -379,7 +379,6 @@ export function startGameServer() {
       connected: true,
       leftGame: false,
       hand: [],
-      messages: [],
     };
     client.seatIndex = seatIndex;
 
@@ -805,7 +804,6 @@ export function startGameServer() {
       handCount: player.hand?.length || 0,
       hand:
         player.playerId === viewerPlayerId ? getPublicHand(room, player) : [],
-      messages: player.playerId === viewerPlayerId ? player.messages || [] : [],
       role: canSeeRole
         ? {
             id: role.id,
@@ -829,9 +827,8 @@ export function startGameServer() {
         needsTarget: configForCard.needsTarget,
         disposable: configForCard.disposable,
         effectLimitKey: configForCard.effectLimitKey,
-        suit: configForCard.suit,
-        rank: configForCard.rank,
-        targetMessage: configForCard.targetMessage,
+        suit: card.suit,
+        rank: card.rank,
         isPlayable: isCardPlayable(room, player, configForCard),
         isBlockedByTurnRule: isCardBlockedByTurnRule(
           room,
@@ -962,7 +959,6 @@ export function startGameServer() {
       player.health = config.defaultHealth;
       player.maxHealth = config.defaultHealth;
       player.hand = [];
-      player.messages = [];
 
       if (player.roleId === "sheriff") {
         player.maxHealth += 1;
@@ -979,7 +975,7 @@ export function startGameServer() {
     room.game.winner = null;
     room.game.winnerText = "";
     room.game.events = [];
-    room.game.deck = shuffle(createTestDeck());
+    room.game.deck = shuffle(createDeck());
     room.game.discard = [];
     room.game.turnPlayedEffects = {};
     dealInitialHands(room);
@@ -1047,29 +1043,12 @@ export function startGameServer() {
     addGameEvent(room, "Сброс перемешан и ушел под колоду.");
   }
 
-  function addPlayerMessage(player, message) {
-    player.messages = [
-      {
-        id: randomUUID(),
-        createdAt: Date.now(),
-        ...message,
-      },
-      ...(player.messages || []),
-    ].slice(0, 5);
-  }
-
   function getCardTitle(card) {
     return cardConfig[card.cardId]?.title || "неизвестно";
   }
 
   function getCardEventColor(card) {
     return cardConfig[card.cardId]?.eventColor || "#c94a35";
-  }
-
-  function formatTargetMessage(configForCard, actor) {
-    return (configForCard.targetMessage || "")
-      .replace("{actor}", actor.name)
-      .replace("{card}", configForCard.title);
   }
 
   function revealDeadPlayer(room, player) {

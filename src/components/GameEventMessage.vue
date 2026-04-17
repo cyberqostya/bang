@@ -72,11 +72,11 @@ function getPlayerLabel(roleId, name) {
 }
 
 .game-event-message__player {
-  color: var(--ink);
+  font-weight: 600;
 }
 
 .game-event-message__card {
-  color: var(--red);
+  font-weight: 600;
 }
 
 .game-event-message__role {

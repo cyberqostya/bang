@@ -1,5 +1,6 @@
 ﻿<script setup>
 import { computed, ref } from "vue";
+import GameCardVisual from "./GameCardVisual.vue";
 import HandCard from "./HandCard.vue";
 import PlayZone from "./PlayZone.vue";
 import { useRoomStore } from "../stores/roomStore.js";
@@ -64,7 +65,7 @@ function closePreview() {
         :aria-label="previewCard.title"
         @click.stop="closePreview"
       >
-        <img :src="previewCard.image" :alt="previewCard.title" />
+        <GameCardVisual :card="previewCard" />
       </button>
     </div>
   </PlayZone>
@@ -157,17 +158,12 @@ function closePreview() {
 }
 
 .hand-preview__card {
+  --card-width: min(72vw, 260px);
+
   width: min(72vw, 260px);
   border-radius: 6px;
   background: transparent;
   animation: hand-preview-in 220ms ease forwards;
-}
-
-.hand-preview__card img {
-  width: 100%;
-  height: auto;
-  border-radius: 6px;
-  box-shadow: 0 18px 36px rgba(29, 29, 29, 0.28);
 }
 
 @keyframes hand-preview-in {

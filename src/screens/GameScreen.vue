@@ -1,11 +1,13 @@
 ﻿<script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import AppScreen from "../components/AppScreen.vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
 import BulletStack from "../components/BulletStack.vue";
 import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
+import GameCardVisual from "../components/GameCardVisual.vue";
 import RoleCardButton from "../components/RoleCardButton.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 import { formatCardsCount } from "../utils/wordForms.js";
@@ -30,9 +32,11 @@ const cardsToDiscardCount = computed(() =>
   Math.max(0, roomStore.ownHand.length - (roomStore.ownPlayer?.health || 0)),
 );
 const discardCardsMessage = computed(
-  () => `Сбросьте ${formatCardsCount(cardsToDiscardCount.value)}`,
+  () => `Сбрось ${formatCardsCount(cardsToDiscardCount.value)}`,
 );
-const currentTurnPlayerId = computed(() => roomStore.room.game?.turnPlayerId || "");
+const currentTurnPlayerId = computed(
+  () => roomStore.room.game?.turnPlayerId || "",
+);
 const canFinishGameRoom = computed(
   () => Boolean(roomStore.room.game?.winnerText) && finishDelayLeft.value === 0,
 );
@@ -185,7 +189,7 @@ function formatMessageTime(timestamp) {
 </script>
 
 <template>
-  <main class="app">
+  <AppScreen class="game-screen">
     <AppHeader>
       <template #left>
         <button
@@ -193,7 +197,7 @@ function formatMessageTime(timestamp) {
           type="button"
           @click.stop="openLeaveGameDialog"
         >
-          Покинуть игру
+          Выход
         </button>
       </template>
       <template #right>
@@ -237,10 +241,7 @@ function formatMessageTime(timestamp) {
         :aria-label="`Отменить ${roomStore.selectedCard.title}`"
         @click.stop="roomStore.cancelSelectedCard"
       >
-        <img
-          :src="roomStore.selectedCard.image"
-          :alt="roomStore.selectedCard.title"
-        />
+        <GameCardVisual :card="roomStore.selectedCard" />
         <span class="selected-action-card__cancel"></span>
       </button>
     </section>
@@ -303,7 +304,7 @@ function formatMessageTime(timestamp) {
             }"
             type="submit"
           >
-            {{ endTurnDialogMode === "discard" ? "Окей" : "Да" }}
+            {{ endTurnDialogMode === "discard" ? "За дело" : "Да" }}
           </button>
         </div>
       </form>
@@ -319,7 +320,9 @@ function formatMessageTime(timestamp) {
     >
       <form class="turn-notice-dialog__form" @submit.prevent="closeTurnNotice">
         <p>Твоя очередь ходить, {{ roomStore.ownPlayer?.name }}</p>
-        <button class="turn-notice-dialog__submit" type="submit">Окей</button>
+        <button class="turn-notice-dialog__submit" type="submit">
+          За дело
+        </button>
       </form>
     </div>
 
@@ -371,7 +374,7 @@ function formatMessageTime(timestamp) {
         </button>
       </div>
     </div>
-  </main>
+  </AppScreen>
 </template>
 
 <style scoped>
@@ -382,7 +385,8 @@ function formatMessageTime(timestamp) {
   padding: 0 10px;
   background: rgba(94, 84, 70, 0.16);
   color: var(--muted);
-  font-size: 22px;
+  font-size: 20px;
+  font-weight: 600;
 }
 
 .leave-game-button {
@@ -392,7 +396,8 @@ function formatMessageTime(timestamp) {
   padding: 0 10px;
   background: rgba(94, 84, 70, 0.16);
   color: var(--muted);
-  font-size: 22px;
+  font-size: 20px;
+  font-weight: 600;
 }
 
 .cards-view {
@@ -423,7 +428,7 @@ function formatMessageTime(timestamp) {
   animation: selected-action-float 1800ms ease-in-out infinite;
 }
 
-.selected-action-card img {
+.selected-action-card :deep(.game-card-visual__image) {
   display: block;
   width: 100%;
   height: auto;
@@ -474,7 +479,6 @@ function formatMessageTime(timestamp) {
 .event-feed {
   display: grid;
   align-content: start;
-  gap: 4px;
   height: 100%;
   min-width: 0;
   overflow-y: auto;
@@ -490,13 +494,24 @@ function formatMessageTime(timestamp) {
   margin: 0;
   min-width: 0;
   color: var(--muted);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
+  padding-top: 5px;
 }
 
 .event-feed__message_turn {
-  margin-top: 15px;
+  grid-template-columns: minmax(0, 1fr) minmax(auto, 70%) minmax(0, 1fr);
+  margin-top: 5px;
   text-align: center;
+}
+
+.event-feed__message_turn .event-feed__text {
+  grid-column: 2;
+}
+
+.event-feed__message_turn .event-feed__time {
+  grid-column: 3;
+  justify-self: end;
 }
 
 .event-feed__text {
@@ -506,6 +521,7 @@ function formatMessageTime(timestamp) {
 .event-feed__time {
   color: var(--muted);
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .table-main {
@@ -528,12 +544,15 @@ function formatMessageTime(timestamp) {
   padding: 0 10px;
   background: rgba(94, 84, 70, 0.16);
   color: var(--ink);
-  font-size: 22px;
+  font-size: 30px;
+  font-weight: 600;
   opacity: 0.72;
 }
 
 .end-turn-button:disabled {
   cursor: default;
+  font-size: 20px;
+  font-weight: 400;
 }
 
 .end-turn-button_active {
@@ -601,6 +620,7 @@ function formatMessageTime(timestamp) {
   min-height: 44px;
   border-radius: 6px;
   font-size: 20px;
+  font-weight: 600;
 }
 
 .result-dialog__panel button:disabled {

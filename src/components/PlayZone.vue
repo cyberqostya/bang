@@ -45,7 +45,9 @@ defineProps({
   border: 1px dashed var(--line);
   border-radius: 6px;
   color: var(--muted);
-  font-size: 24px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.05em;
   line-height: 1;
 }
 
@@ -73,12 +75,12 @@ defineProps({
 }
 
 .play-zone_events {
-  height: calc(18px * 5 + 36px);
+  height: 100px;
 }
 
 .play-zone_events .play-zone__content {
   overflow: hidden;
   border-bottom: 1px dashed var(--line);
-  padding-top: 20px;
+  padding-top: 5px;
 }
 </style>

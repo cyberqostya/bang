@@ -6,8 +6,8 @@
   }
 }
 
-export function normalizeName(value) {
-  return String(value || "").trim().slice(0, 20);
+export function normalizeName(value, maxLength = 20) {
+  return String(value || "").trim().slice(0, maxLength);
 }
 
 export function normalizeRoomName(value, maxLength) {

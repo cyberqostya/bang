@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { nextTick, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import AppScreen from "../components/AppScreen.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
@@ -83,7 +84,7 @@ function getStableRoomAssetIndex(value) {
 </script>
 
 <template>
-  <main class="rooms-screen">
+  <AppScreen class="rooms-screen">
     <AppHeader>
       <template #left>
         <button
@@ -229,22 +230,13 @@ function getStableRoomAssetIndex(value) {
         </div>
       </form>
     </div>
-  </main>
+  </AppScreen>
 </template>
 
 <style scoped>
 .rooms-screen {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
   align-content: start;
   gap: 10px;
-  width: min(100%, 600px);
-  height: 100dvh;
-  margin-inline: auto;
-  padding: 0;
-  background: var(--page-back);
 }
 
 .create-room-button,
@@ -255,7 +247,8 @@ function getStableRoomAssetIndex(value) {
   padding: 0 10px;
   background: var(--gold);
   color: var(--ink);
-  font-size: 24px;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .create-room-button:disabled {
@@ -384,14 +377,11 @@ function getStableRoomAssetIndex(value) {
 }
 
 .room-card__text span {
-  max-width: 14ch;
-  overflow: hidden;
   color: var(--back-soft);
   font-size: 26px;
+  font-weight: 500;
   line-height: 1;
-  text-overflow: ellipsis;
   text-shadow: 0 2px 8px rgba(29, 29, 29, 0.8);
-  white-space: nowrap;
 }
 
 .room-card__text small {

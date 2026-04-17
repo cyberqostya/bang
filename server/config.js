@@ -5,6 +5,7 @@
   bulletSkinCount: 10,
   hatSkinCount: 13,
   maxRoomNameLength: 15,
+  maxPlayerNameLength: 12,
   maxPasswordLength: 40,
   maxActiveRooms: 100,
   maxRoomCreatesPerWindow: 5,

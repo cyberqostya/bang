@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { nextTick, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import AppScreen from "../components/AppScreen.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
@@ -64,7 +65,7 @@ function confirmCloseRoom() {
 </script>
 
 <template>
-  <main class="seats-screen">
+  <AppScreen class="seats-screen">
     <AppHeader>
       <template #left>
         <button
@@ -94,7 +95,7 @@ function confirmCloseRoom() {
           :disabled="!roomStore.canStartGame"
           @click="roomStore.startGame"
         >
-          Начать
+          Начать игру
         </button>
       </template>
     </AppHeader>
@@ -150,7 +151,7 @@ function confirmCloseRoom() {
           autocapitalize="none"
           autocorrect="off"
           spellcheck="false"
-          maxlength="15"
+          maxlength="12"
           placeholder="Имя"
         />
         <div class="name-dialog__actions">
@@ -195,21 +196,12 @@ function confirmCloseRoom() {
         </div>
       </form>
     </div>
-  </main>
+  </AppScreen>
 </template>
 
 <style scoped>
 .seats-screen {
-  position: fixed;
-  inset: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
-  width: min(100%, 600px);
-  height: 100dvh;
-  margin-inline: auto;
-  padding: 0;
-  background: var(--page-back);
 }
 
 .header-button {
@@ -219,7 +211,8 @@ function confirmCloseRoom() {
   padding: 0 10px;
   background: var(--gold);
   color: var(--ink);
-  font-size: 22px;
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .header-button_muted {
@@ -256,7 +249,8 @@ function confirmCloseRoom() {
 
 .seat-table__oval span {
   color: rgba(94, 84, 70, 0.34);
-  font-size: 28px;
+  font-size: 20px;
+  font-weight: 600;
   line-height: 1;
   text-align: center;
 }
@@ -317,8 +311,7 @@ function confirmCloseRoom() {
   border-radius: 6px;
   height: auto;
   width: auto;
-  min-width: 8ch;
-  min-height: 1.5em;
+  min-height: 1.2em;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -326,13 +319,15 @@ function confirmCloseRoom() {
   text-align: center;
   padding-inline: 5px;
   border: none;
+  outline: 2px solid rgba(94, 84, 70, 0.3);
 }
 
 .seat__name {
   width: 100%;
   height: 100%;
   color: var(--ink);
-  font-size: 24px;
+  font-size: 18px;
+  font-weight: 500;
   line-height: 1;
   text-align: center;
 }
@@ -480,6 +475,7 @@ function confirmCloseRoom() {
   border: none;
   border-radius: 6px;
   font-size: 20px;
+  font-weight: 600;
 }
 
 .name-dialog__cancel,
