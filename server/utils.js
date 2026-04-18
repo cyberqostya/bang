@@ -15,7 +15,7 @@ export function normalizeRoomName(value, maxLength) {
 }
 
 export function normalizePassword(value, maxLength) {
-  return String(value || "").trim().slice(0, maxLength);
+  return String(value || "").replace(/\D/g, "").slice(0, maxLength);
 }
 
 export function normalizePlayerId(value) {

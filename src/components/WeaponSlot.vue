@@ -1,17 +1,69 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import CardPreview from "./CardPreview.vue";
+import GameCardVisual from "./GameCardVisual.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
+const weapon = computed(() => roomStore.ownPlayer?.weapon || null);
 const attackRange = computed(() => roomStore.ownPlayer?.attackRange || 1);
+const isPreviewOpen = ref(false);
+const canPreviewWeapon = computed(
+  () => Boolean(weapon.value) && !roomStore.isMyTurn,
+);
+const canActivateWeaponProperty = computed(
+  () => Boolean(weapon.value?.propertyAction) && roomStore.isMyTurn,
+);
+const isWeaponPropertyActive = computed(() => {
+  const effectLimitKey = weapon.value?.propertyEffectLimitKey;
+
+  if (!effectLimitKey) return false;
+
+  return Boolean(roomStore.ownPlayer?.activeEffectAllowances?.[effectLimitKey]);
+});
+
+function handleWeaponTap() {
+  if (canActivateWeaponProperty.value) {
+    roomStore.activateWeaponProperty();
+    return;
+  }
+
+  if (!canPreviewWeapon.value) return;
+
+  isPreviewOpen.value = true;
+}
+
+function closePreview() {
+  isPreviewOpen.value = false;
+}
 </script>
 
 <template>
-  <div class="weapon-slot" aria-label="Оружие">
-    <img class="weapon-slot__weapon" src="/images/colt.webp" alt="" />
-    <span class="weapon-slot__range" aria-hidden="true">
+  <div
+    class="weapon-slot"
+    :class="{
+      'weapon-slot_filled': weapon,
+      'weapon-slot_previewable': canPreviewWeapon,
+      'weapon-slot_property-ready': canActivateWeaponProperty,
+      'weapon-slot_property-active': isWeaponPropertyActive,
+    }"
+    aria-label="Оружие"
+  >
+    <button
+      v-if="weapon"
+      class="weapon-slot__card"
+      type="button"
+      :aria-label="weapon.title"
+      :disabled="!canPreviewWeapon && !canActivateWeaponProperty"
+      @click.stop="handleWeaponTap"
+    >
+      <GameCardVisual :card="weapon" />
+    </button>
+    <img v-else class="weapon-slot__weapon" src="/images/colt.webp" alt="" />
+    <span v-if="!weapon" class="weapon-slot__range" aria-hidden="true">
       <span>{{ attackRange }}</span>
     </span>
+    <CardPreview v-if="isPreviewOpen && weapon" :card="weapon" @close="closePreview" />
   </div>
 </template>
 
@@ -29,6 +81,41 @@ const attackRange = computed(() => roomStore.ownPlayer?.attackRange || 1);
   padding: 8px 6px 6px;
   background: rgba(243, 241, 219, 0.4);
   overflow: hidden;
+}
+
+.weapon-slot_filled {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: 0 8px 18px rgba(94, 84, 70, 0.14);
+}
+
+.weapon-slot__card {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.weapon-slot__card:disabled {
+  cursor: default;
+}
+
+.weapon-slot_previewable .weapon-slot__card {
+  cursor: zoom-in;
+}
+
+.weapon-slot_property-ready .weapon-slot__card {
+  cursor: pointer;
+}
+
+.weapon-slot_property-active {
+  outline: 2px solid rgba(240, 160, 32, 0.92);
+  outline-offset: 5px;
+  box-shadow:
+    0 8px 18px rgba(94, 84, 70, 0.14),
+    0 0 18px rgba(240, 160, 32, 0.38);
 }
 
 .weapon-slot__weapon {
@@ -82,4 +169,5 @@ const attackRange = computed(() => roomStore.ownPlayer?.attackRange || 1);
   font-weight: 700;
   line-height: 1;
 }
+
 </style>

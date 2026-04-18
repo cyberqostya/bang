@@ -1,6 +1,6 @@
 ﻿<script setup>
 import { computed, ref } from "vue";
-import GameCardVisual from "./GameCardVisual.vue";
+import CardPreview from "./CardPreview.vue";
 import HandCard from "./HandCard.vue";
 import PlayZone from "./PlayZone.vue";
 import { useRoomStore } from "../stores/roomStore.js";
@@ -56,18 +56,15 @@ function closePreview() {
         :is-discarding="roomStore.isDiscardingCards"
         @select="handleCardTap(card)"
       />
+      <span
+        v-if="handCards.length === 0"
+        key="empty-hand-spacer"
+        class="hand-strip__empty-card"
+        aria-hidden="true"
+      ></span>
     </TransitionGroup>
 
-    <div v-if="previewCard" class="hand-preview" @click.stop="closePreview">
-      <button
-        class="hand-preview__card"
-        type="button"
-        :aria-label="previewCard.title"
-        @click.stop="closePreview"
-      >
-        <GameCardVisual :card="previewCard" />
-      </button>
-    </div>
+    <CardPreview v-if="previewCard" :card="previewCard" @close="closePreview" />
   </PlayZone>
 </template>
 
@@ -101,6 +98,14 @@ function closePreview() {
 .hand-strip::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(94, 84, 70, 0.48);
+}
+
+.hand-strip__empty-card {
+  flex: 0 0 var(--card-width);
+  width: var(--card-width);
+  aspect-ratio: 0.625;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .hand-card-move,
@@ -148,33 +153,4 @@ function closePreview() {
   }
 }
 
-.hand-preview {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  background: rgba(29, 29, 29, 0.28);
-}
-
-.hand-preview__card {
-  --card-width: min(72vw, 260px);
-
-  width: min(72vw, 260px);
-  border-radius: 6px;
-  background: transparent;
-  animation: hand-preview-in 220ms ease forwards;
-}
-
-@keyframes hand-preview-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.72);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
 </style>

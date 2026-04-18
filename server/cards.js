@@ -2,6 +2,7 @@ export const cardConfig = {
   bang: {
     id: "bang",
     title: "BANG",
+    eventTitle: "БЭНГ",
     image: "/images/cards/bang.webp",
     playMode: "instant",
     eventColor: "#c94a35",
@@ -11,6 +12,70 @@ export const cardConfig = {
     usesWeaponRange: true,
     disposable: true,
     effectLimitKey: "bang",
+  },
+  remington: {
+    id: "remington",
+    title: "Remington",
+    eventTitle: "Ремингтон",
+    image: "/images/cards/remington.webp",
+    playMode: "permanent",
+    eventColor: "#975f2a",
+    action: "equipWeapon",
+    needsTarget: false,
+    disposable: false,
+    weaponRange: 3,
+  },
+  carbine: {
+    id: "carbine",
+    title: "Carbine",
+    eventTitle: "Карабин",
+    image: "/images/cards/carbine.webp",
+    playMode: "permanent",
+    eventColor: "#975f2a",
+    action: "equipWeapon",
+    needsTarget: false,
+    disposable: false,
+    weaponRange: 4,
+  },
+  winchester: {
+    id: "winchester",
+    title: "Winchester",
+    eventTitle: "Винчестер",
+    image: "/images/cards/winchester.webp",
+    playMode: "permanent",
+    eventColor: "#975f2a",
+    action: "equipWeapon",
+    needsTarget: false,
+    disposable: false,
+    weaponRange: 5,
+  },
+  scofield: {
+    id: "scofield",
+    title: "Scofield",
+    eventTitle: "Скофилд",
+    image: "/images/cards/scofield.webp",
+    playMode: "permanent",
+    eventColor: "#975f2a",
+    action: "equipWeapon",
+    needsTarget: false,
+    disposable: false,
+    weaponRange: 2,
+  },
+  volcanic: {
+    id: "volcanic",
+    title: "Volcanic",
+    eventTitle: "Волканик",
+    image: "/images/cards/volcanic.webp",
+    playMode: "permanent",
+    eventColor: "#975f2a",
+    action: "equipWeapon",
+    propertyAction: "unlockEffectLimit",
+    propertyEffectLimitKey: "bang",
+    propertyCharges: 1,
+    propertyLabel: "Можно сыграть еще один БЭНГ",
+    needsTarget: false,
+    disposable: false,
+    weaponRange: 1,
   },
 };
 
@@ -96,11 +161,29 @@ const bangCards = [
   "3c",
 ];
 
+const weaponCards = [
+  ["remington", "Kc"],
+  ["carbine", "Ac"],
+  ["winchester", "8s"],
+  ["scofield", "Ks"],
+  ["scofield", "Qc"],
+  ["scofield", "Jc"],
+  ["volcanic", "10c"],
+  ["volcanic", "10s"],
+];
+
 export function createDeck() {
-  return bangCards.map((cardCode, index) => createDeckCard(cardCode, index));
+  return [
+    ...bangCards.map((cardCode, index) =>
+      createDeckCard("bang", cardCode, index),
+    ),
+    ...weaponCards.map(([cardId, cardCode], index) =>
+      createDeckCard(cardId, cardCode, index),
+    ),
+  ];
 }
 
-function createDeckCard(cardCode, index) {
+function createDeckCard(cardId, cardCode, index) {
   const [, rankCode, suitShortId] = cardCode.match(/^(.+)([cdhs])$/) || [];
   const suit = suitByShortId[suitShortId];
   const rank = rankConfig[rankCode] || {
@@ -109,8 +192,8 @@ function createDeckCard(cardCode, index) {
   };
 
   return {
-    instanceId: `bang-${cardCode.toLowerCase()}-${index + 1}`,
-    cardId: "bang",
+    instanceId: `${cardId}-${cardCode.toLowerCase()}-${index + 1}`,
+    cardId,
     cardCode,
     rank,
     suit,

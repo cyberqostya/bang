@@ -45,12 +45,58 @@ function getPlayerLabel(roleId, name) {
       </span>
     </template>
 
+    <template v-else-if="event.type === 'equip'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span>оружие</span>
+      <span class="game-event-message__separator"> -- </span>
+      <span
+        class="game-event-message__card"
+        :style="{ color: event.cardColor }"
+      >
+        {{ event.cardTitle }}
+      </span>
+    </template>
+
+    <template v-else-if="event.type === 'propertyUse'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span> активировал свойство </span>
+      <span
+        class="game-event-message__card"
+        :style="{ color: event.cardColor }"
+      >
+        {{ event.cardTitle }}
+      </span>
+    </template>
+
     <template v-else-if="event.type === 'death'">
       <span class="game-event-message__player">
         {{ getPlayerLabel(event.playerRoleId, event.playerName) }}
       </span>
       <span> умер, его роль была </span>
       <span class="game-event-message__role">{{ event.roleLabel }}</span>
+    </template>
+
+    <template v-else-if="event.type === 'healthLoss'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.playerRoleId, event.playerName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span class="game-event-message__damage">
+        -{{ event.amount }}HP
+      </span>
+    </template>
+
+    <template v-else-if="event.type === 'outlawBounty'">
+      <span>За убийство бандита, </span>
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span> получает награду: {{ event.cardsCount }} карты</span>
     </template>
 
     <template v-else-if="event.type === 'turn'">
@@ -81,6 +127,11 @@ function getPlayerLabel(roleId, name) {
 
 .game-event-message__role {
   text-decoration: underline;
+}
+
+.game-event-message__damage {
+  color: var(--red);
+  font-weight: 700;
 }
 
 .game-event-message__separator {

@@ -12,36 +12,116 @@ import GameCardVisual from "../components/GameCardVisual.vue";
 import RoleCardButton from "../components/RoleCardButton.vue";
 import WeaponSlot from "../components/WeaponSlot.vue";
 import { useRoomStore } from "../stores/roomStore.js";
-import { formatCardsCount } from "../utils/wordForms.js";
 
 const roomStore = useRoomStore();
 const viewMode = ref("cards");
 const eventFeedElement = ref(null);
 const isApplyingCardOnPlayers = ref(false);
-const isEndTurnDialogOpen = ref(false);
 const isLeaveGameDialogOpen = ref(false);
 const isTurnNoticeOpen = ref(false);
-const endTurnDialogMode = ref("confirm");
+const isDeathNoticeAccepted = ref(false);
+const activePhaseIndex = ref(0);
+const wasDiscardingCards = ref(false);
 const finishDelayLeft = ref(0);
-const turnPlayerName = computed(
-  () =>
-    roomStore.players.find(
-      (player) => player.playerId === roomStore.room.game?.turnPlayerId,
-    )?.name || "",
-);
 const gameEvents = computed(() => roomStore.room.game?.events || []);
-const cardsToDiscardCount = computed(() =>
-  Math.max(0, roomStore.ownHand.length - (roomStore.ownPlayer?.health || 0)),
-);
-const discardCardsMessage = computed(
-  () => `Сбрось ${formatCardsCount(cardsToDiscardCount.value)}`,
-);
+const turnNoticePlayerLabel = computed(() => {
+  const ownPlayer = roomStore.ownPlayer;
+
+  if (!ownPlayer) return "";
+
+  return ownPlayer.role?.id === "sheriff"
+    ? `Шериф ${ownPlayer.name}`
+    : ownPlayer.name;
+});
 const currentTurnPlayerId = computed(
   () => roomStore.room.game?.turnPlayerId || "",
 );
 const canFinishGameRoom = computed(
   () => Boolean(roomStore.room.game?.winnerText) && finishDelayLeft.value === 0,
 );
+const canUseDrawPhase = computed(
+  () =>
+    roomStore.isMyTurn &&
+    !roomStore.room.game?.turnDrawTaken &&
+    !roomStore.room.game?.turnActionTaken,
+);
+const isPlayPhaseDisabled = computed(
+  () =>
+    !roomStore.isMyTurn ||
+    roomStore.isDiscardingCards ||
+    activePhaseIndex.value > 0 ||
+    Boolean(roomStore.room.game?.turnActionTaken),
+);
+const shouldShowDeathNotice = computed(
+  () =>
+    roomStore.room.status === "game" &&
+    Boolean(roomStore.ownPlayer) &&
+    !roomStore.ownPlayer.isAlive &&
+    !isDeathNoticeAccepted.value &&
+    !roomStore.room.game?.winnerText,
+);
+const resultDialogText = computed(() =>
+  isOwnPlayerWinner.value ? "Вы победили!" : roomStore.room.game?.winnerText,
+);
+const resultDialogSegments = computed(() => {
+  if (isOwnPlayerWinner.value) {
+    return [{ text: "Вы победили!", strong: false }];
+  }
+
+  const details = roomStore.room.game?.winnerDetails;
+
+  if (!details) {
+    return [{ text: roomStore.room.game?.winnerText || "", strong: false }];
+  }
+
+  if (details.type === "renegade") {
+    return [
+      { text: "Победил Ренегат ", strong: false },
+      { text: details.renegade?.name || "", strong: true },
+      { text: ", он уничтожил всех и остался один", strong: false },
+    ];
+  }
+
+  if (details.type === "sheriffKilledOutlaws") {
+    const outlaws = details.outlaws || [];
+
+    return [
+      {
+        text: `Шериф убит: победили бандит(ы)${outlaws.length > 0 ? " " : ""}`,
+        strong: false,
+      },
+      ...joinNameSegments(outlaws),
+    ];
+  }
+
+  if (details.type === "law") {
+    const deputies = details.deputies || [];
+
+    return [
+      { text: "Шериф ", strong: false },
+      { text: details.sheriff?.name || "", strong: true },
+      ...getDeputyVictorySegments(deputies),
+      {
+        text: ` ${deputies.length > 0 ? "победили" : "победил"}: все бандиты и ренегат(ы) мертвы`,
+        strong: false,
+      },
+    ];
+  }
+
+  return [{ text: resultDialogText.value || "", strong: false }];
+});
+const isOwnPlayerWinner = computed(() => {
+  const winner = roomStore.room.game?.winner;
+  const roleId = roomStore.ownPlayer?.role?.id;
+  const team = roomStore.ownPlayer?.role?.team;
+
+  if (!winner || !roleId) return false;
+  if (winner === "outlaws") return roleId === "outlaw";
+  if (winner === "renegade") return roleId === "renegade";
+  if (winner === "law") return team === "law";
+
+  return winner === team;
+});
 
 let finishDelayTimer = null;
 
@@ -91,9 +171,19 @@ watch(
 
     if (!selectedCard && isApplyingCardOnPlayers.value) {
       isApplyingCardOnPlayers.value = false;
-      viewMode.value = "cards";
     }
   },
+);
+
+watch(
+  () => roomStore.room.status,
+  (status) => {
+    if (status !== "game") return;
+
+    viewMode.value = "players";
+    activePhaseIndex.value = 0;
+  },
+  { immediate: true },
 );
 
 watch(
@@ -109,9 +199,30 @@ watch(
 
     viewMode.value = "cards";
     roomStore.cancelSelectedCard();
+    activePhaseIndex.value = 0;
     isTurnNoticeOpen.value = true;
   },
   { immediate: true },
+);
+
+watch(
+  () => roomStore.isDiscardingCards,
+  (isDiscardingCards) => {
+    if (wasDiscardingCards.value && !isDiscardingCards) {
+      viewMode.value = "players";
+    }
+
+    wasDiscardingCards.value = isDiscardingCards;
+  },
+);
+
+watch(
+  () => roomStore.ownPlayer?.isAlive,
+  (isAlive) => {
+    if (isAlive !== false) {
+      isDeathNoticeAccepted.value = false;
+    }
+  },
 );
 
 function toggleViewMode() {
@@ -138,45 +249,13 @@ function closeTurnNotice() {
   isTurnNoticeOpen.value = false;
 }
 
+function acceptDeathNotice() {
+  isDeathNoticeAccepted.value = true;
+}
+
 function confirmLeaveGame() {
   roomStore.leaveRoom();
   closeLeaveGameDialog();
-}
-
-function openEndTurnDialog() {
-  if (!roomStore.isMyTurn || roomStore.room.status !== "game") return;
-
-  endTurnDialogMode.value = "confirm";
-  isEndTurnDialogOpen.value = true;
-}
-
-function closeEndTurnDialog() {
-  isEndTurnDialogOpen.value = false;
-  endTurnDialogMode.value = "confirm";
-}
-
-function confirmEndTurn() {
-  if (roomStore.mustDiscardCards) {
-    endTurnDialogMode.value = "discard";
-    return;
-  }
-
-  roomStore.endTurn();
-  closeEndTurnDialog();
-}
-
-function confirmDiscardCards() {
-  roomStore.startDiscardingCards();
-  closeEndTurnDialog();
-}
-
-function submitEndTurnDialog() {
-  if (endTurnDialogMode.value === "discard") {
-    confirmDiscardCards();
-    return;
-  }
-
-  confirmEndTurn();
 }
 
 function formatMessageTime(timestamp) {
@@ -187,6 +266,49 @@ function formatMessageTime(timestamp) {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(timestamp));
+}
+
+function joinNameSegments(players) {
+  return players.flatMap((player, index) => [
+    { text: index > 0 ? ", " : "", strong: false },
+    { text: player.name, strong: true },
+  ]);
+}
+
+function getDeputyVictorySegments(deputies) {
+  if (deputies.length === 0) return [];
+
+  return [
+    { text: " и живые помощники ", strong: false },
+    ...joinNameSegments(deputies),
+  ];
+}
+
+function handleDiscardPhase() {
+  if (!roomStore.isMyTurn) return;
+
+  activePhaseIndex.value = 2;
+
+  if (roomStore.mustDiscardCards) {
+    roomStore.startDiscardingCards();
+    return;
+  }
+
+  roomStore.endTurn();
+  viewMode.value = "players";
+}
+
+function handlePlayPhase() {
+  if (!roomStore.isMyTurn || roomStore.isDiscardingCards) return;
+
+  activePhaseIndex.value = Math.max(activePhaseIndex.value, 1);
+}
+
+function handleDrawPhase() {
+  if (!canUseDrawPhase.value) return;
+
+  activePhaseIndex.value = Math.max(activePhaseIndex.value, 0);
+  roomStore.drawPhase();
 }
 </script>
 
@@ -248,7 +370,45 @@ function formatMessageTime(timestamp) {
       </button>
     </section>
 
-    <section v-else class="cards-view">
+    <section
+      v-else
+      class="cards-view"
+      :class="{ 'cards-view_with-phases': roomStore.room.status === 'game' }"
+    >
+      <PlayZone
+        v-if="roomStore.room.status === 'game'"
+        title="Фазы хода"
+        variant="phases"
+        :class="{ 'turn-phases-zone_active': roomStore.isMyTurn }"
+      >
+        <div class="turn-phases">
+          <button
+            class="turn-phase-button turn-phase-button_draw"
+            type="button"
+            :disabled="!canUseDrawPhase || activePhaseIndex > 0"
+            @click.stop="handleDrawPhase"
+          >
+            Набор
+          </button>
+          <button
+            class="turn-phase-button"
+            type="button"
+            :disabled="isPlayPhaseDisabled"
+            @click.stop="handlePlayPhase"
+          >
+            Розыгрыш
+          </button>
+          <button
+            class="turn-phase-button"
+            type="button"
+            :disabled="!roomStore.isMyTurn || roomStore.isDiscardingCards"
+            @click.stop="handleDiscardPhase"
+          >
+            Сброс
+          </button>
+        </div>
+      </PlayZone>
+
       <PlayZone title="Стол" variant="table">
         <div class="table-main">
           <BulletStack />
@@ -258,63 +418,10 @@ function formatMessageTime(timestamp) {
             <RoleCardButton />
           </div>
         </div>
-        <div v-if="roomStore.room.status === 'game'" class="turn-row">
-          <button
-            class="end-turn-button"
-            :class="{ 'end-turn-button_active': roomStore.isMyTurn }"
-            type="button"
-            :disabled="!roomStore.isMyTurn"
-            @click.stop="openEndTurnDialog"
-          >
-            {{
-              roomStore.isMyTurn
-                ? "Завершить ход"
-                : `Ход игрока: ${turnPlayerName}`
-            }}
-          </button>
-        </div>
       </PlayZone>
 
       <BottomPanel />
     </section>
-
-    <div
-      v-if="isEndTurnDialogOpen"
-      class="turn-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Завершить ход"
-      @click.stop
-    >
-      <form class="turn-dialog__form" @submit.prevent="submitEndTurnDialog">
-        <p>
-          {{
-            endTurnDialogMode === "discard"
-              ? discardCardsMessage
-              : "Точно завершить ход?"
-          }}
-        </p>
-        <div class="turn-dialog__actions">
-          <button
-            v-if="endTurnDialogMode === 'confirm'"
-            class="turn-dialog__cancel"
-            type="button"
-            @click="closeEndTurnDialog"
-          >
-            Нет
-          </button>
-          <button
-            class="turn-dialog__submit"
-            :class="{
-              'turn-dialog__submit_wide': endTurnDialogMode === 'discard',
-            }"
-            type="submit"
-          >
-            {{ endTurnDialogMode === "discard" ? "За дело" : "Да" }}
-          </button>
-        </div>
-      </form>
-    </div>
 
     <div
       v-if="isTurnNoticeOpen"
@@ -325,7 +432,7 @@ function formatMessageTime(timestamp) {
       @click.stop
     >
       <form class="turn-notice-dialog__form" @submit.prevent="closeTurnNotice">
-        <p>Твоя очередь ходить, {{ roomStore.ownPlayer?.name }}</p>
+        <p>Твоя очередь ходить, {{ turnNoticePlayerLabel }}</p>
         <button class="turn-notice-dialog__submit" type="submit">
           За дело
         </button>
@@ -358,6 +465,25 @@ function formatMessageTime(timestamp) {
     </div>
 
     <div
+      v-if="shouldShowDeathNotice"
+      class="death-notice-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Вы убиты"
+      @click.stop
+    >
+      <form
+        class="death-notice-dialog__form"
+        @submit.prevent="acceptDeathNotice"
+      >
+        <p>Вы убиты</p>
+        <button class="death-notice-dialog__submit" type="submit">
+          Принять смерть
+        </button>
+      </form>
+    </div>
+
+    <div
       v-if="roomStore.room.game?.winnerText"
       class="result-dialog"
       role="dialog"
@@ -366,7 +492,15 @@ function formatMessageTime(timestamp) {
       @click.stop
     >
       <div class="result-dialog__panel">
-        <p>{{ roomStore.room.game.winnerText }}</p>
+        <p>
+          <template
+            v-for="(segment, index) in resultDialogSegments"
+            :key="index"
+          >
+            <strong v-if="segment.strong">{{ segment.text }}</strong>
+            <span v-else>{{ segment.text }}</span>
+          </template>
+        </p>
         <button
           type="button"
           :disabled="!canFinishGameRoom"
@@ -411,6 +545,11 @@ function formatMessageTime(timestamp) {
   grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
+  padding-bottom: 5px;
+}
+
+.cards-view_with-phases {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .players-view {
@@ -545,42 +684,47 @@ function formatMessageTime(timestamp) {
   flex: 0 0 auto;
 }
 
-.turn-row {
+.turn-phases {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
 }
 
-.end-turn-button {
+.turn-phases-zone_active {
+  outline: 2px solid rgba(240, 160, 32, 0.75);
+  outline-offset: -2px;
+  box-shadow:
+    inset 0 0 0 1px rgba(243, 241, 219, 0.7),
+    0 0 18px rgba(240, 160, 32, 0.22);
+}
+
+.turn-phases-zone_active :deep(.play-zone__content) {
+  background: rgba(240, 160, 32, 0.08);
+}
+
+.turn-phase-button {
   min-height: 42px;
   border-radius: 6px;
   padding: 0 10px;
   background: rgba(94, 84, 70, 0.16);
   color: var(--ink);
-  font-size: 30px;
+  font-size: 19px;
   font-weight: 600;
-  opacity: 0.72;
 }
 
-.end-turn-button:disabled {
+.turn-phase-button:not(:disabled) {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.turn-phase-button:disabled {
   cursor: default;
-  font-size: 20px;
-  font-weight: 400;
+  opacity: 0.48;
 }
 
-.end-turn-button_active {
-  background: var(--red);
-  color: var(--back);
-  opacity: 1;
-  box-shadow:
-    0 0 0 2px rgba(153, 57, 40, 0.16),
-    0 0 18px rgba(153, 57, 40, 0.34);
-  animation: end-turn-pulse 1150ms ease-in-out infinite;
-}
-
-.turn-dialog,
 .turn-notice-dialog,
 .leave-game-dialog,
+.death-notice-dialog,
 .result-dialog {
   position: fixed;
   inset: 0;
@@ -595,9 +739,9 @@ function formatMessageTime(timestamp) {
   z-index: 40;
 }
 
-.turn-dialog__form,
 .turn-notice-dialog__form,
 .leave-game-dialog__form,
+.death-notice-dialog__form,
 .result-dialog__panel {
   display: grid;
   gap: 10px;
@@ -608,9 +752,9 @@ function formatMessageTime(timestamp) {
   background: var(--back-soft);
 }
 
-.turn-dialog__form p,
 .turn-notice-dialog__form p,
 .leave-game-dialog__form p,
+.death-notice-dialog__form p,
 .result-dialog__panel p {
   margin: 0;
   color: var(--ink);
@@ -619,16 +763,19 @@ function formatMessageTime(timestamp) {
   text-align: center;
 }
 
-.turn-dialog__actions,
+.result-dialog__panel strong {
+  font-weight: 700;
+}
+
 .leave-game-dialog__actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-.turn-dialog__actions button,
 .turn-notice-dialog__submit,
 .leave-game-dialog__actions button,
+.death-notice-dialog__submit,
 .result-dialog__panel button {
   min-height: 44px;
   border-radius: 6px;
@@ -641,38 +788,16 @@ function formatMessageTime(timestamp) {
   opacity: 0.52;
 }
 
-.turn-dialog__cancel,
 .leave-game-dialog__cancel {
   background: rgba(94, 84, 70, 0.16);
   color: var(--muted);
 }
 
-.turn-dialog__submit,
 .turn-notice-dialog__submit,
 .leave-game-dialog__submit,
+.death-notice-dialog__submit,
 .result-dialog__panel button {
   background: var(--gold);
   color: var(--ink);
-}
-
-.turn-dialog__submit_wide {
-  grid-column: 1 / -1;
-}
-
-@keyframes end-turn-pulse {
-  0%,
-  100% {
-    filter: brightness(0.94);
-    box-shadow:
-      0 0 0 2px rgba(153, 57, 40, 0.14),
-      0 0 14px rgba(153, 57, 40, 0.28);
-  }
-
-  50% {
-    filter: brightness(1.12);
-    box-shadow:
-      0 0 0 3px rgba(240, 160, 32, 0.3),
-      0 0 24px rgba(153, 57, 40, 0.54);
-  }
 }
 </style>

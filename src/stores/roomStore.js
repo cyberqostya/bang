@@ -6,6 +6,7 @@ const fallbackRoom = {
   name: "",
   status: "lobby",
   hostPlayerId: null,
+  playersCount: 0,
   seats: Array.from({ length: 8 }, (_, index) => ({
     index,
     player: null,
@@ -51,7 +52,7 @@ export const useRoomStore = defineStore("room", () => {
   );
   const isSeated = computed(() => Boolean(ownPlayer.value));
   const canStartGame = computed(
-    () => isHost.value && isSeated.value && players.value.length > 1,
+    () => isHost.value && room.value.playersCount > 1,
   );
   const isMyTurn = computed(
     () => room.value.game?.turnPlayerId === playerId.value,
@@ -223,6 +224,15 @@ export const useRoomStore = defineStore("room", () => {
 
     if (!card?.isPlayable) return;
 
+    if (!card.needsTarget) {
+      send("game:action", {
+        action: card.action,
+        cardInstanceId: card.instanceId,
+      });
+      cancelSelectedCard();
+      return;
+    }
+
     selectedCardId.value =
       selectedCardId.value === cardInstanceId ? "" : cardInstanceId;
   }
@@ -249,6 +259,18 @@ export const useRoomStore = defineStore("room", () => {
     cancelSelectedCard();
   }
 
+  function drawPhase() {
+    send("game:action", {
+      action: "drawPhase",
+    });
+  }
+
+  function activateWeaponProperty() {
+    send("game:action", {
+      action: "activateWeaponProperty",
+    });
+  }
+
   function startDiscardingCards() {
     if (!mustDiscardCards.value) return;
 
@@ -267,9 +289,7 @@ export const useRoomStore = defineStore("room", () => {
 
   function startGame() {
     if (!canStartGame.value) {
-      error.value = isSeated.value
-        ? "Нужно минимум два игрока за столом"
-        : "Сначала займите место за столом";
+      error.value = "Нужно минимум два игрока в комнате";
       return;
     }
 
@@ -422,10 +442,12 @@ export const useRoomStore = defineStore("room", () => {
     screen,
     wsUrl,
     cancelSelectedCard,
+    activateWeaponProperty,
     closeRoom,
     connect,
     createRoom,
     discardCard,
+    drawPhase,
     endTurn,
     finishGameRoom,
     joinRoom,

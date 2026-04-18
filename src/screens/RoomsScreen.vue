@@ -45,6 +45,11 @@ async function openJoinDialog(room) {
     return;
   }
 
+  if (room.status !== "lobby") {
+    roomStore.error = "В этой комнате уже идет игра, подключение невозможно";
+    return;
+  }
+
   joinRoomId.value = room.id;
   joinPassword.value = "";
   isJoinDialogOpen.value = true;
@@ -81,6 +86,28 @@ function getStableRoomAssetIndex(value) {
 
   return (hash % 12) + 1;
 }
+
+function normalizePinInput(value) {
+  return String(value || "")
+    .replace(/\D/g, "")
+    .slice(0, 4);
+}
+
+function updateRoomPassword(event) {
+  roomPassword.value = normalizePinInput(event.target.value);
+}
+
+function updateJoinPassword(event) {
+  joinPassword.value = normalizePinInput(event.target.value);
+}
+
+function getRoomStatusText(room) {
+  const count = `${room.playersCount}/${room.maxPlayers || 8}`;
+
+  return room.status !== "lobby"
+    ? `Игра в процессе ${count}`
+    : `Идёт набор игроков: ${count}`;
+}
 </script>
 
 <template>
@@ -112,13 +139,7 @@ function getStableRoomAssetIndex(value) {
         >
           <span class="room-card__text">
             <span>{{ room.name }}</span>
-            <small>
-              {{
-                room.status === "game"
-                  ? `Игра идет · ${room.playersCount}/${room.maxPlayers || 8}`
-                  : `Игроков: ${room.playersCount}/${room.maxPlayers}`
-              }}
-            </small>
+            <small>{{ getRoomStatusText(room) }}</small>
           </span>
           <img class="room-card__enter" src="/images/room-enter.svg" alt="" />
         </button>
@@ -171,10 +192,16 @@ function getStableRoomAssetIndex(value) {
         <input
           v-model="roomPassword"
           class="room-dialog__input"
-          type="password"
-          autocomplete="new-password"
-          maxlength="40"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          autocomplete="off"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
+          maxlength="4"
           placeholder="Пароль"
+          @input="updateRoomPassword"
         />
         <div class="room-dialog__actions">
           <button
@@ -207,10 +234,16 @@ function getStableRoomAssetIndex(value) {
           ref="joinPasswordInput"
           v-model="joinPassword"
           class="room-dialog__input"
-          type="password"
-          autocomplete="current-password"
-          maxlength="40"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          autocomplete="off"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
+          maxlength="4"
           placeholder="Пароль"
+          @input="updateJoinPassword"
         />
         <div class="room-dialog__actions">
           <button

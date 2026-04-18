@@ -14,7 +14,12 @@ const aliveSeatIndexes = computed(() =>
 
 const seats = computed(() =>
   roomStore.room.seats
-    .filter((seat) => seat.player)
+    .filter(
+      (seat) =>
+        seat.player &&
+        ((seat.player.isAlive && !seat.player.leftGame) ||
+          seat.player.playerId === roomStore.playerId),
+    )
     .map((seat) => ({
       ...seat,
       isOwn: seat.player?.playerId === roomStore.playerId,
@@ -116,7 +121,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
       @click.stop="roomStore.useSelectedCard(seat.player.playerId)"
     >
       <span
-        v-if="seat.player.isAlive"
+        v-if="seat.player.isAlive || seat.isOwn"
         class="game-seat__statuses"
         aria-hidden="true"
       >
@@ -146,10 +151,10 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
           alt=""
         />
         <span class="game-seat__label">
+          <span class="game-seat__name">{{ seat.player.name }}</span>
           <span v-if="isSheriff(seat.player)" class="game-seat__role">
             Шериф
           </span>
-          <span class="game-seat__name">{{ seat.player.name }}</span>
         </span>
       </span>
     </button>
@@ -272,7 +277,6 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   width: 14px;
   height: auto;
   object-fit: contain;
-  filter: drop-shadow(0 2px 3px rgba(29, 29, 29, 0.22));
 }
 
 .game-seat__health img + img {
@@ -331,7 +335,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   position: absolute;
   left: 50%;
   top: 30px;
-  z-index: 2;
+  z-index: 3;
   width: 54px;
   height: 54px;
   border: 2px solid rgba(201, 74, 53, 0.82);
@@ -395,6 +399,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   font-size: 14px;
   font-weight: 400;
   margin-bottom: -4px;
+  font-style: italic;
 }
 
 .game-seat_1 {

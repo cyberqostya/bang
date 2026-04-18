@@ -56,7 +56,7 @@ defineProps({
   min-width: 0;
   height: 100%;
   min-height: 0;
-  padding: 10px 5px 5px;
+  padding: 5px;
 }
 
 .play-zone_hand .play-zone__content {
@@ -69,9 +69,8 @@ defineProps({
 
 .play-zone_table .play-zone__content {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 10px;
   overflow: visible;
+  border-top: 1px dashed var(--line);
 }
 
 .play-zone_events {
