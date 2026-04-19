@@ -28,7 +28,9 @@ function handleCardTap(card) {
     return;
   }
 
-  previewCard.value = card;
+  if (!roomStore.isMyTurn) {
+    previewCard.value = card;
+  }
 }
 
 function closePreview() {
@@ -51,7 +53,11 @@ function closePreview() {
         :key="card.instanceId"
         :card="card"
         :is-selected="roomStore.selectedCardId === card.instanceId"
-        :is-disabled="card.isBlockedByTurnRule && !roomStore.isDiscardingCards"
+        :is-disabled="
+          card.isBlockedByTurnRule &&
+          card.cardId !== 'bang' &&
+          !roomStore.isDiscardingCards
+        "
         :can-select="card.isPlayable || roomStore.isDiscardingCards"
         :is-discarding="roomStore.isDiscardingCards"
         @select="handleCardTap(card)"

@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import AppScreen from "../components/AppScreen.vue";
 import PlayZone from "../components/PlayZone.vue";
@@ -22,8 +22,52 @@ const isTurnNoticeOpen = ref(false);
 const isDeathNoticeAccepted = ref(false);
 const activePhaseIndex = ref(0);
 const wasDiscardingCards = ref(false);
+const wasReactionParticipant = ref(false);
+const reactionNow = ref(Date.now());
 const finishDelayLeft = ref(0);
+let reactionCountdownTimer = null;
+const REACTION_WINDOW_MS = 5 * 1000;
 const gameEvents = computed(() => roomStore.room.game?.events || []);
+const pendingReaction = computed(() => roomStore.room.game?.pendingReaction || null);
+const isReactionTarget = computed(
+  () => pendingReaction.value?.targetPlayerId === roomStore.playerId,
+);
+const isReactionActor = computed(
+  () => pendingReaction.value?.actorPlayerId === roomStore.playerId,
+);
+const shouldShowReactionOverlay = computed(
+  () => isReactionTarget.value || isReactionActor.value,
+);
+const reactionNoticeCardTitle = computed(
+  () => pendingReaction.value?.cardTitle || "БЭНГ",
+);
+const reactionNoticeColor = computed(
+  () => pendingReaction.value?.cardColor || "#c94a35",
+);
+const reactionCountdown = computed(() => {
+  if (!pendingReaction.value?.expiresAt) return 0;
+
+  return Math.max(
+    0,
+    Math.ceil((pendingReaction.value.expiresAt - reactionNow.value) / 1000),
+  );
+});
+const reactionTimeLeftRatio = computed(() => {
+  if (!pendingReaction.value?.expiresAt) return 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      (pendingReaction.value.expiresAt - reactionNow.value) /
+        REACTION_WINDOW_MS,
+    ),
+  );
+});
+const reactionProgressStyle = computed(() => ({
+  backgroundColor: reactionNoticeColor.value,
+  transform: `scaleX(${reactionTimeLeftRatio.value})`,
+}));
 const turnNoticePlayerLabel = computed(() => {
   const ownPlayer = roomStore.ownPlayer;
 
@@ -217,6 +261,34 @@ watch(
 );
 
 watch(
+  () => pendingReaction.value?.id || "",
+  (reactionId, previousReactionId) => {
+    window.clearInterval(reactionCountdownTimer);
+    reactionCountdownTimer = null;
+
+    if (!reactionId) {
+      if (previousReactionId && wasReactionParticipant.value) {
+        viewMode.value = "players";
+      }
+      wasReactionParticipant.value = false;
+      return;
+    }
+
+    reactionNow.value = Date.now();
+    wasReactionParticipant.value = isReactionTarget.value || isReactionActor.value;
+
+    if (isReactionTarget.value) {
+      viewMode.value = "cards";
+      roomStore.cancelSelectedCard();
+    }
+
+    reactionCountdownTimer = window.setInterval(() => {
+      reactionNow.value = Date.now();
+    }, 200);
+  },
+);
+
+watch(
   () => roomStore.ownPlayer?.isAlive,
   (isAlive) => {
     if (isAlive !== false) {
@@ -224,6 +296,10 @@ watch(
     }
   },
 );
+
+onBeforeUnmount(() => {
+  window.clearInterval(reactionCountdownTimer);
+});
 
 function toggleViewMode() {
   viewMode.value = viewMode.value === "cards" ? "players" : "cards";
@@ -482,6 +558,43 @@ function handleDrawPhase() {
         </button>
       </form>
     </div>
+
+    <Transition name="reaction-notice">
+      <section
+        v-if="shouldShowReactionOverlay"
+        class="reaction-notice"
+        aria-live="assertive"
+      >
+        <span
+          class="reaction-notice__progress"
+          :style="reactionProgressStyle"
+        ></span>
+        <p class="reaction-notice__text">
+          <template v-if="isReactionTarget">
+            <span>Вы стали целью </span>
+            <span
+              class="reaction-notice__card"
+              :style="{ color: reactionNoticeColor }"
+            >
+              [{{ reactionNoticeCardTitle }}]
+            </span>
+            <span>. Время на вашу реакцию:</span>
+          </template>
+          <template v-else>
+            <span>Ожидаем реакцию жертвы на </span>
+            <span
+              class="reaction-notice__card"
+              :style="{ color: reactionNoticeColor }"
+            >
+              [{{ reactionNoticeCardTitle }}]
+            </span>
+          </template>
+        </p>
+        <span class="reaction-notice__count">
+          {{ reactionCountdown }}
+        </span>
+      </section>
+    </Transition>
 
     <div
       v-if="roomStore.room.game?.winnerText"
@@ -799,5 +912,86 @@ function handleDrawPhase() {
 .result-dialog__panel button {
   background: var(--gold);
   color: var(--ink);
+}
+
+.reaction-notice {
+  pointer-events: none;
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  z-index: 35;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 14px;
+  min-height: 76px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  background:
+    linear-gradient(135deg, rgba(37, 32, 27, 0.92), rgba(16, 15, 14, 0.86)),
+    rgba(29, 29, 29, 0.88);
+  box-shadow:
+    0 16px 32px rgba(29, 29, 29, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.reaction-notice__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 5px;
+  transform-origin: left center;
+  transition: transform 180ms linear;
+}
+
+.reaction-notice__text {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.16;
+  text-wrap: balance;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+
+.reaction-notice__card {
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.reaction-notice__count {
+  min-width: 54px;
+  color: #fff;
+  font-size: 48px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: right;
+  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
+}
+
+.reaction-notice-enter-active {
+  animation: reaction-notice-drop 260ms cubic-bezier(0.2, 0.85, 0.26, 1.1)
+    both;
+}
+
+.reaction-notice-leave-active {
+  animation: reaction-notice-drop 180ms ease-in reverse both;
+}
+
+@keyframes reaction-notice-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-110%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

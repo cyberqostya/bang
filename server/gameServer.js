@@ -200,6 +200,7 @@ export function startGameServer() {
       startedAt: null,
       gameExpirationTimer: null,
       finishedRoomTimer: null,
+      pendingReactionTimer: null,
     };
 
     rooms.set(room.id, room);
@@ -513,6 +514,16 @@ export function startGameServer() {
       return;
     }
 
+    if (room.game.pendingReaction) {
+      if (payload.action === "missed") {
+        playReactionAction(client, room, payload);
+        return;
+      }
+
+      sendError(client.socket, "Ждем реакцию");
+      return;
+    }
+
     if (payload.action === "endTurn") {
       endTurn(client, room);
       return;
@@ -711,15 +722,18 @@ export function startGameServer() {
         targetName: result.targetPlayer.name,
         targetRoleId: result.targetPlayer.roleId,
       });
-      addGameEvent(room, {
-        type: "healthLoss",
-        playerName: result.targetPlayer.name,
-        playerRoleId: result.targetPlayer.roleId,
-        amount: result.healthLoss,
-      });
       markTurnActionTaken(room);
-      revealDeadPlayer(room, result.targetPlayer, actor);
-      checkVictory(room);
+      startPendingReaction(room, {
+        sourceAction: "bang",
+        actorPlayerId: actor.playerId,
+        actorName: actor.name,
+        targetPlayerId: result.targetPlayer.playerId,
+        targetName: result.targetPlayer.name,
+        cardTitle: getCardEventTitle(card),
+        cardColor: configForCard.eventColor,
+        targetPrompt: configForCard.targetPrompt,
+        actorPendingPrompt: configForCard.actorPendingPrompt,
+      });
     }
 
     if (payload.action === "equipWeapon") {
@@ -875,8 +889,113 @@ export function startGameServer() {
 
     const healthLoss = 1;
 
-    targetPlayer.health = Math.max(0, targetPlayer.health - healthLoss);
     return { targetPlayer, healthLoss };
+  }
+
+  function startPendingReaction(room, reaction) {
+    clearPendingReaction(room);
+
+    room.game.pendingReaction = {
+      id: randomUUID(),
+      ...reaction,
+      healthLoss: 1,
+      expiresAt: Date.now() + config.reactionWindowMs,
+    };
+    room.pendingReactionTimer = setTimeout(() => {
+      resolvePendingReactionTimeout(room);
+    }, config.reactionWindowMs);
+  }
+
+  function resolvePendingReactionTimeout(room) {
+    const pendingReaction = room.game.pendingReaction;
+
+    if (!pendingReaction) return;
+
+    const targetPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === pendingReaction.targetPlayerId,
+    )?.player;
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === pendingReaction.actorPlayerId,
+    )?.player;
+
+    clearPendingReaction(room);
+
+    if (!targetPlayer?.isAlive) {
+      broadcastRoom(room.id);
+      return;
+    }
+
+    targetPlayer.health = Math.max(
+      0,
+      targetPlayer.health - pendingReaction.healthLoss,
+    );
+    addGameEvent(room, {
+      type: "healthLoss",
+      playerName: targetPlayer.name,
+      playerRoleId: targetPlayer.roleId,
+      amount: pendingReaction.healthLoss,
+    });
+    revealDeadPlayer(room, targetPlayer, actor);
+    checkVictory(room);
+    broadcastRoom(room.id);
+  }
+
+  function clearPendingReaction(room) {
+    if (room.pendingReactionTimer) {
+      clearTimeout(room.pendingReactionTimer);
+      room.pendingReactionTimer = null;
+    }
+
+    if (room.game) {
+      room.game.pendingReaction = null;
+    }
+  }
+
+  function playReactionAction(client, room, payload = {}) {
+    const pendingReaction = room.game.pendingReaction;
+
+    if (!pendingReaction || pendingReaction.targetPlayerId !== client.playerId) {
+      sendError(client.socket, "Сейчас нельзя сыграть реакцию");
+      return;
+    }
+
+    const targetPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const cardIndex =
+      targetPlayer?.hand.findIndex(
+        (card) => card.instanceId === payload.cardInstanceId,
+      ) ?? -1;
+
+    if (!targetPlayer || cardIndex === -1) {
+      sendError(client.socket, "Карты нет на руке");
+      return;
+    }
+
+    const card = targetPlayer.hand[cardIndex];
+    const configForCard = cardConfig[card.cardId];
+
+    if (
+      !configForCard ||
+      configForCard.action !== payload.action ||
+      !configForCard.reactionTo?.includes(pendingReaction.sourceAction)
+    ) {
+      sendError(client.socket, "Некорректная реакция");
+      return;
+    }
+
+    const [discardedCard] = targetPlayer.hand.splice(cardIndex, 1);
+
+    room.game.discard.push(discardedCard);
+    addGameEvent(room, {
+      type: "reaction",
+      actorName: targetPlayer.name,
+      actorRoleId: targetPlayer.roleId,
+      cardTitle: getCardEventTitle(card),
+      cardColor: configForCard.eventColor,
+    });
+    clearPendingReaction(room);
+    broadcastRoom(room.id);
   }
 
   function leaveGame(room, playerId) {
@@ -885,6 +1004,14 @@ export function startGameServer() {
     if (seatIndex === null) return;
 
     const player = room.seats[seatIndex].player;
+
+    if (
+      room.game.pendingReaction &&
+      (room.game.pendingReaction.actorPlayerId === playerId ||
+        room.game.pendingReaction.targetPlayerId === playerId)
+    ) {
+      clearPendingReaction(room);
+    }
 
     if (!player.isAlive) {
       player.leftGame = true;
@@ -997,6 +1124,7 @@ export function startGameServer() {
     clearGameExpiration(room);
     clearFinishedRoomCleanup(room);
     clearEmptyRoomTimer(room.id);
+    clearPendingReaction(room);
 
     room.seats.forEach((seat) => {
       if (seat.player) {
@@ -1045,6 +1173,7 @@ export function startGameServer() {
       turnPlayerId: room.game.turnPlayerId,
       turnDrawTaken: room.game.turnDrawTaken,
       turnActionTaken: room.game.turnActionTaken,
+      pendingReaction: room.game.pendingReaction,
       winner: room.game.winner,
       winnerText: room.game.winnerText,
       winnerDetails: room.game.winnerDetails,
@@ -1138,6 +1267,9 @@ export function startGameServer() {
 
   function isCardPlayable(room, player, configForCard) {
     if (room.status !== "game") return false;
+    if (configForCard.playMode === "reaction") {
+      return isReactionCardPlayable(room, player, configForCard);
+    }
     if (!player.isAlive || room.game.turnPlayerId !== player.playerId)
       return false;
     if (!configForCard.effectLimitKey) return true;
@@ -1173,6 +1305,17 @@ export function startGameServer() {
         player.playerId,
         configForCard.effectLimitKey,
       )
+    );
+  }
+
+  function isReactionCardPlayable(room, player, configForCard) {
+    const pendingReaction = room.game.pendingReaction;
+
+    return Boolean(
+      pendingReaction &&
+        player.isAlive &&
+        pendingReaction.targetPlayerId === player.playerId &&
+        configForCard.reactionTo?.includes(pendingReaction.sourceAction),
     );
   }
 
@@ -1335,6 +1478,7 @@ export function startGameServer() {
       events: [],
       deck: [],
       discard: [],
+      pendingReaction: null,
       turnPlayedEffects: {},
       turnEffectAllowances: {},
       turnDrawTaken: false,
@@ -1384,6 +1528,7 @@ export function startGameServer() {
     room.game.events = [];
     room.game.deck = shuffle(createDeck());
     room.game.discard = [];
+    clearPendingReaction(room);
     room.game.turnPlayedEffects = {};
     room.game.turnEffectAllowances = {};
     dealInitialHands(room);
@@ -1576,6 +1721,7 @@ export function startGameServer() {
   }
 
   function finishGame(room, winner, winnerText, winnerDetails = null) {
+    clearPendingReaction(room);
     room.status = "finished";
     room.game.winner = winner;
     room.game.winnerText = winnerText;

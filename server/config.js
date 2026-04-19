@@ -14,5 +14,6 @@
   playerDisconnectGraceMs: 5 * 60 * 1000,
   emptyRoomGraceMs: 0,
   finishedRoomGraceMs: 60 * 1000,
+  reactionWindowMs: 5 * 1000,
   gameTtlMs: 5 * 60 * 60 * 1000,
 };

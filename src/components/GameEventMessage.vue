@@ -73,6 +73,19 @@ function getPlayerLabel(roleId, name) {
       </span>
     </template>
 
+    <template v-else-if="event.type === 'reaction'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span
+        class="game-event-message__card"
+        :style="{ color: event.cardColor }"
+      >
+        {{ event.cardTitle }}
+      </span>
+    </template>
+
     <template v-else-if="event.type === 'death'">
       <span class="game-event-message__player">
         {{ getPlayerLabel(event.playerRoleId, event.playerName) }}

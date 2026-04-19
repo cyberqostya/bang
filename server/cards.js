@@ -7,11 +7,25 @@ export const cardConfig = {
     playMode: "instant",
     eventColor: "#c94a35",
     action: "bang",
+    targetPrompt: "Вы стали целью БЭНГ",
+    actorPendingPrompt: "Ожидание реакции жертвы",
     selectionView: "players",
     needsTarget: true,
     usesWeaponRange: true,
     disposable: true,
     effectLimitKey: "bang",
+  },
+  missed: {
+    id: "missed",
+    title: "Missed",
+    eventTitle: "МИМО",
+    image: "/images/cards/missed.webp",
+    playMode: "reaction",
+    eventColor: "#c94a35",
+    action: "missed",
+    reactionTo: ["bang"],
+    needsTarget: false,
+    disposable: true,
   },
   remington: {
     id: "remington",
@@ -161,6 +175,21 @@ const bangCards = [
   "3c",
 ];
 
+const missedCards = [
+  "2s",
+  "Kc",
+  "8s",
+  "7s",
+  "Jc",
+  "3s",
+  "10c",
+  "6s",
+  "4s",
+  "5s",
+  "Qc",
+  "Ac",
+];
+
 const weaponCards = [
   ["remington", "Kc"],
   ["carbine", "Ac"],
@@ -176,6 +205,9 @@ export function createDeck() {
   return [
     ...bangCards.map((cardCode, index) =>
       createDeckCard("bang", cardCode, index),
+    ),
+    ...missedCards.map((cardCode, index) =>
+      createDeckCard("missed", cardCode, index),
     ),
     ...weaponCards.map(([cardId, cardCode], index) =>
       createDeckCard(cardId, cardCode, index),
