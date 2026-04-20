@@ -507,7 +507,12 @@ function createPlayerId() {
     return window.crypto.randomUUID();
   }
 
-  return `player-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const randomValues = new Uint32Array(2);
+  window.crypto.getRandomValues(randomValues);
+
+  return `player-${Date.now()}-${Array.from(randomValues, (value) =>
+    value.toString(16).padStart(8, "0"),
+  ).join("")}`;
 }
 
 function getWebSocketUrl() {

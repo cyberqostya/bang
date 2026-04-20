@@ -11,8 +11,11 @@ import CharacterSlot from "../components/CharacterSlot.vue";
 import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
 import GameCardVisual from "../components/GameCardVisual.vue";
+import ReactionNotice from "../components/ReactionNotice.vue";
 import RoleCardButton from "../components/RoleCardButton.vue";
 import WeaponSlot from "../components/WeaponSlot.vue";
+import { useGameResult } from "../composables/useGameResult.js";
+import { useReactionNotice } from "../composables/useReactionNotice.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
@@ -32,65 +35,22 @@ const reactionNow = ref(Date.now());
 const finishDelayLeft = ref(0);
 let reactionCountdownTimer = null;
 let turnCheckNoticeTimer = null;
-const REACTION_WINDOW_MS = 5 * 1000;
 const gameEvents = computed(() => roomStore.room.game?.events || []);
-const pendingReaction = computed(
-  () => roomStore.room.game?.pendingReaction || null,
-);
-const isReactionTarget = computed(
-  () =>
-    pendingReaction.value?.targetPlayerId === roomStore.playerId ||
-    pendingReaction.value?.targetPlayerIds?.includes(roomStore.playerId),
-);
-const isReactionActor = computed(
-  () => pendingReaction.value?.actorPlayerId === roomStore.playerId,
-);
-const shouldShowReactionOverlay = computed(
-  () => isReactionTarget.value || isReactionActor.value,
-);
+const { resultDialogSegments } = useGameResult(roomStore);
+const {
+  barrelCheckFailure,
+  isReactionActor,
+  isReactionTarget,
+  pendingReaction,
+  reactionActorPrompt,
+  reactionCountdown,
+  reactionNoticeCardTitle,
+  reactionNoticeColor,
+  reactionProgressStyle,
+  shouldShowReactionOverlay,
+} = useReactionNotice(roomStore, reactionNow);
 const shouldShowTurnCheckNotice = computed(
   () => Boolean(turnCheckNotice.value) && !shouldShowReactionOverlay.value,
-);
-const reactionNoticeCardTitle = computed(
-  () => pendingReaction.value?.cardTitle || "БЭНГ",
-);
-const reactionNoticeColor = computed(
-  () => pendingReaction.value?.cardColor || "#c94a35",
-);
-const reactionActorPrompt = computed(
-  () =>
-    `Ожидание реакции ${
-      (pendingReaction.value?.targetPlayerIds?.length || 0) > 1
-        ? "жертв"
-        : "жертвы"
-    } на`,
-);
-const reactionCountdown = computed(() => {
-  if (!pendingReaction.value?.expiresAt) return 0;
-
-  return Math.max(
-    0,
-    Math.ceil((pendingReaction.value.expiresAt - reactionNow.value) / 1000),
-  );
-});
-const reactionTimeLeftRatio = computed(() => {
-  if (!pendingReaction.value?.expiresAt) return 0;
-
-  return Math.max(
-    0,
-    Math.min(
-      1,
-      (pendingReaction.value.expiresAt - reactionNow.value) /
-        REACTION_WINDOW_MS,
-    ),
-  );
-});
-const reactionProgressStyle = computed(() => ({
-  backgroundColor: reactionNoticeColor.value,
-  transform: `scaleX(${reactionTimeLeftRatio.value})`,
-}));
-const barrelCheckFailure = computed(
-  () => pendingReaction.value?.barrelChecks?.[roomStore.playerId] || null,
 );
 const turnNoticePlayerLabel = computed(() => {
   const ownPlayer = roomStore.ownPlayer;
@@ -136,68 +96,6 @@ const shouldShowDeathNotice = computed(
     !isDeathNoticeAccepted.value &&
     !roomStore.room.game?.winnerText,
 );
-const resultDialogText = computed(() =>
-  isOwnPlayerWinner.value ? "Вы победили!" : roomStore.room.game?.winnerText,
-);
-const resultDialogSegments = computed(() => {
-  if (isOwnPlayerWinner.value) {
-    return [{ text: "Вы победили!", strong: false }];
-  }
-
-  const details = roomStore.room.game?.winnerDetails;
-
-  if (!details) {
-    return [{ text: roomStore.room.game?.winnerText || "", strong: false }];
-  }
-
-  if (details.type === "renegade") {
-    return [
-      { text: "Победил Ренегат ", strong: false },
-      { text: details.renegade?.name || "", strong: true },
-      { text: ", он уничтожил всех и остался один", strong: false },
-    ];
-  }
-
-  if (details.type === "sheriffKilledOutlaws") {
-    const outlaws = details.outlaws || [];
-
-    return [
-      {
-        text: `Шериф убит: победили бандит(ы)${outlaws.length > 0 ? " " : ""}`,
-        strong: false,
-      },
-      ...joinNameSegments(outlaws),
-    ];
-  }
-
-  if (details.type === "law") {
-    const deputies = details.deputies || [];
-
-    return [
-      { text: "Шериф ", strong: false },
-      { text: details.sheriff?.name || "", strong: true },
-      ...getDeputyVictorySegments(deputies),
-      {
-        text: ` ${deputies.length > 0 ? "победили" : "победил"}: все бандиты и ренегат(ы) мертвы`,
-        strong: false,
-      },
-    ];
-  }
-
-  return [{ text: resultDialogText.value || "", strong: false }];
-});
-const isOwnPlayerWinner = computed(() => {
-  const winner = roomStore.room.game?.winner;
-  const roleId = roomStore.ownPlayer?.role?.id;
-  const team = roomStore.ownPlayer?.role?.team;
-
-  if (!winner || !roleId) return false;
-  if (winner === "outlaws") return roleId === "outlaw";
-  if (winner === "renegade") return roleId === "renegade";
-  if (winner === "law") return team === "law";
-
-  return winner === team;
-});
 
 let finishDelayTimer = null;
 
@@ -474,22 +372,6 @@ function formatMessageTime(timestamp) {
   }).format(new Date(timestamp));
 }
 
-function joinNameSegments(players) {
-  return players.flatMap((player, index) => [
-    { text: index > 0 ? ", " : "", strong: false },
-    { text: player.name, strong: true },
-  ]);
-}
-
-function getDeputyVictorySegments(deputies) {
-  if (deputies.length === 0) return [];
-
-  return [
-    { text: " и живые помощники ", strong: false },
-    ...joinNameSegments(deputies),
-  ];
-}
-
 function handleDiscardPhase() {
   if (!roomStore.isMyTurn || isOwnTurnCheck.value) return;
 
@@ -711,93 +593,25 @@ function handleDrawPhase() {
     </div>
 
     <Transition name="reaction-notice">
-      <section
+      <ReactionNotice
         v-if="shouldShowReactionOverlay"
-        class="reaction-notice"
-        aria-live="assertive"
-      >
-        <span
-          class="reaction-notice__progress"
-          :style="reactionProgressStyle"
-        ></span>
-        <div class="reaction-notice__copy">
-          <p class="reaction-notice__text">
-            <template v-if="isReactionTarget">
-              <span>Вы стали целью </span>
-              <span
-                class="reaction-notice__card"
-                :style="{ color: reactionNoticeColor }"
-              >
-                [{{ reactionNoticeCardTitle }}]
-              </span>
-              <span>.</span>
-            </template>
-            <template v-else>
-              <span>{{ reactionActorPrompt }} </span>
-              <span
-                class="reaction-notice__card"
-                :style="{ color: reactionNoticeColor }"
-              >
-                [{{ reactionNoticeCardTitle }}]
-              </span>
-            </template>
-          </p>
-          <template v-if="isReactionTarget">
-            <p class="reaction-notice__subtext">
-              До потери здоровья осталось ->
-            </p>
-          </template>
-          <p
-            v-if="isReactionTarget && barrelCheckFailure"
-            class="reaction-notice__subtext reaction-notice__check-text"
-          >
-            <span>Проверка {{ barrelCheckFailure.checkCardTitle }}</span>
-            <span> -- {{ barrelCheckFailure.resultTitle }}</span>
-            <span> -- вытянул карту </span>
-            <span class="reaction-notice__check-card">
-              <span>"</span>
-              <span
-                :style="{ color: barrelCheckFailure.drawnCard?.suit?.color }"
-              >
-                {{ barrelCheckFailure.drawnCard?.title }}
-              </span>
-              <span>-</span>
-              <span
-                class="reaction-notice__check-rank"
-                :style="{ color: barrelCheckFailure.drawnCard?.suit?.color }"
-              >
-                {{ barrelCheckFailure.drawnCard?.rank?.label }}
-              </span>
-              <img
-                class="reaction-notice__check-suit"
-                :src="barrelCheckFailure.drawnCard?.suit?.image"
-                :alt="barrelCheckFailure.drawnCard?.suit?.label"
-              />
-              <span>"</span>
-            </span>
-            <span v-if="barrelCheckFailure.consequenceText">
-              -- {{ barrelCheckFailure.consequenceText }}
-            </span>
-          </p>
-        </div>
-        <span class="reaction-notice__count">
-          {{ reactionCountdown }}
-        </span>
-      </section>
+        :barrel-check-failure="barrelCheckFailure"
+        :is-reaction-target="isReactionTarget"
+        :pending-reaction="pendingReaction"
+        :reaction-actor-prompt="reactionActorPrompt"
+        :reaction-countdown="reactionCountdown"
+        :reaction-notice-card-title="reactionNoticeCardTitle"
+        :reaction-notice-color="reactionNoticeColor"
+        :reaction-progress-style="reactionProgressStyle"
+      />
     </Transition>
 
     <Transition name="reaction-notice">
-      <section
+      <ReactionNotice
         v-if="shouldShowTurnCheckNotice"
-        class="reaction-notice reaction-notice_check"
-        aria-live="assertive"
-      >
-        <div class="reaction-notice__copy">
-          <p class="reaction-notice__subtext reaction-notice__check-text">
-            <GameEventMessage :event="turnCheckNotice" />
-          </p>
-        </div>
-      </section>
+        mode="check"
+        :turn-check-notice="turnCheckNotice"
+      />
     </Transition>
 
     <div
@@ -1132,144 +946,4 @@ function handleDrawPhase() {
   color: var(--ink);
 }
 
-.reaction-notice {
-  pointer-events: none;
-  position: fixed;
-  left: 8px;
-  right: 8px;
-  top: 8px;
-  z-index: 35;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: 14px;
-  min-height: 76px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 18px;
-  padding: 18px 18px 14px;
-  background:
-    linear-gradient(135deg, rgba(37, 32, 27, 0.92), rgba(16, 15, 14, 0.86)),
-    rgba(29, 29, 29, 0.88);
-  box-shadow:
-    0 16px 32px rgba(29, 29, 29, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  color: #fff;
-}
-
-.reaction-notice_check {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.reaction-notice_check :deep(.game-event-message),
-.reaction-notice_check :deep(.game-event-message__player),
-.reaction-notice_check :deep(.game-event-message__separator),
-.reaction-notice_check :deep(.game-event-message__check-source),
-.reaction-notice_check :deep(.game-event-message__damage) {
-  color: #fff !important;
-}
-
-.reaction-notice_check :deep(.game-event-message__check-drawn) {
-  border-radius: 6px;
-  padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.94);
-  text-shadow: none;
-}
-
-.reaction-notice__progress {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 5px;
-  transform-origin: left center;
-  transition: transform 180ms linear;
-}
-
-.reaction-notice__copy {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.reaction-notice__text {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.94);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.16;
-  text-wrap: balance;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
-}
-
-.reaction-notice__card {
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.reaction-notice__subtext {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1;
-  text-wrap: balance;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
-}
-
-.reaction-notice__check-text {
-  color: #fff;
-  line-height: 1.3;
-}
-
-.reaction-notice__check-card {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  vertical-align: baseline;
-  border-radius: 6px;
-  padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.94);
-  text-shadow: none;
-}
-
-.reaction-notice__check-rank {
-  font-weight: 800;
-}
-
-.reaction-notice__check-suit {
-  width: auto;
-  height: 0.9em;
-  object-fit: contain;
-}
-
-.reaction-notice__count {
-  min-width: 54px;
-  color: #fff;
-  font-size: 48px;
-  font-weight: 800;
-  line-height: 1;
-  text-align: right;
-  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
-}
-
-.reaction-notice-enter-active {
-  animation: reaction-notice-drop 260ms cubic-bezier(0.2, 0.85, 0.26, 1.1) both;
-}
-
-.reaction-notice-leave-active {
-  animation: reaction-notice-drop 180ms ease-in reverse both;
-}
-
-@keyframes reaction-notice-drop {
-  from {
-    opacity: 0;
-    transform: translateY(-110%);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 </style>

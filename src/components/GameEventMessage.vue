@@ -1,8 +1,12 @@
 <script setup>
-defineProps({
+const props = defineProps({
   event: {
     type: Object,
     required: true,
+  },
+  tone: {
+    type: String,
+    default: "default",
   },
 });
 
@@ -31,10 +35,21 @@ function getCheckResultTitle(event) {
 
   return event.isSuccess ? "УСПЕХ" : "ПРОВАЛ";
 }
+
+function getColorStyle(color) {
+  return props.tone === "light" ? null : { color };
+}
+
+function getDrawnCardStyle(event) {
+  return { color: event.drawnCard?.suit?.color };
+}
 </script>
 
 <template>
-  <span class="game-event-message">
+  <span
+    class="game-event-message"
+    :class="{ 'game-event-message_light': props.tone === 'light' }"
+  >
     <template v-if="event.type === 'card'">
       <span class="game-event-message__player">
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
@@ -44,7 +59,7 @@ function getCheckResultTitle(event) {
         v-if="event.previewCard"
         class="game-event-message__card game-event-message__card_preview"
         type="button"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
         @click.stop="previewEventCard(event.previewCard)"
       >
         {{ event.cardTitle }}
@@ -52,7 +67,7 @@ function getCheckResultTitle(event) {
       <span
         v-else
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
@@ -73,7 +88,7 @@ function getCheckResultTitle(event) {
         v-if="event.previewCard"
         class="game-event-message__card game-event-message__card_preview"
         type="button"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
         @click.stop="previewEventCard(event.previewCard)"
       >
         {{ event.cardTitle }}
@@ -81,7 +96,7 @@ function getCheckResultTitle(event) {
       <span
         v-else
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
@@ -96,7 +111,7 @@ function getCheckResultTitle(event) {
       <span class="game-event-message__separator"> -- </span>
       <span
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
@@ -109,7 +124,7 @@ function getCheckResultTitle(event) {
       <span> активировал свойство </span>
       <span
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
@@ -122,7 +137,7 @@ function getCheckResultTitle(event) {
       <span class="game-event-message__separator"> -- </span>
       <span
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
@@ -135,10 +150,10 @@ function getCheckResultTitle(event) {
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span class="game-event-message__separator"> -- </span>
-      <span>Проверка </span>
+      <span>проверка </span>
       <span
         class="game-event-message__check-source"
-        :style="{ color: getCheckCardColor(event) }"
+        :style="getColorStyle(getCheckCardColor(event))"
       >
         {{ getCheckCardTitle(event) }}
       </span>
@@ -146,16 +161,13 @@ function getCheckResultTitle(event) {
       <span>{{ getCheckResultTitle(event) }}</span>
       <span class="game-event-message__separator"> -- </span>
       <span>вытянул карту </span>
-      <span class="game-event-message__check-drawn">
-        <span>"</span>
-        <span :style="{ color: event.drawnCard?.suit?.color }">
-          {{ event.drawnCard?.title }}
-        </span>
+      <span
+        class="game-event-message__check-drawn"
+        :style="getDrawnCardStyle(event)"
+      >
+        <span>{{ event.drawnCard?.title }}</span>
         <span>-</span>
-        <span
-          class="game-event-message__check-rank"
-          :style="{ color: event.drawnCard?.suit?.color }"
-        >
+        <span class="game-event-message__check-rank">
           {{ event.drawnCard?.rank?.label }}
         </span>
         <img
@@ -172,7 +184,7 @@ function getCheckResultTitle(event) {
         <span class="game-event-message__separator"> -- </span>
         <span
           class="game-event-message__damage"
-          :style="{ color: event.damageColor }"
+          :style="getColorStyle(event.damageColor)"
         >
           -{{ event.damageAmount }}HP
         </span>
@@ -188,7 +200,7 @@ function getCheckResultTitle(event) {
         v-if="event.previewCard"
         class="game-event-message__card game-event-message__card_preview"
         type="button"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
         @click.stop="previewEventCard(event.previewCard)"
       >
         {{ event.cardTitle }}
@@ -196,7 +208,7 @@ function getCheckResultTitle(event) {
       <span
         v-else
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
@@ -209,7 +221,7 @@ function getCheckResultTitle(event) {
       <span class="game-event-message__separator"> -- </span>
       <span
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
@@ -224,14 +236,14 @@ function getCheckResultTitle(event) {
       <span class="game-event-message__separator"> -- </span>
       <span
         class="game-event-message__card"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         {{ event.cardTitle }}
       </span>
       <span class="game-event-message__separator"> -- </span>
       <span
         class="game-event-message__heal"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         +{{ event.amount }}HP
       </span>
@@ -247,7 +259,7 @@ function getCheckResultTitle(event) {
       <span class="game-event-message__separator"> -- </span>
       <span
         class="game-event-message__heal"
-        :style="{ color: event.cardColor }"
+        :style="getColorStyle(event.cardColor)"
       >
         +{{ event.amount }}HP
       </span>
@@ -293,6 +305,14 @@ function getCheckResultTitle(event) {
 <style scoped>
 .game-event-message {
   min-width: 0;
+}
+
+.game-event-message_light,
+.game-event-message_light .game-event-message__player,
+.game-event-message_light .game-event-message__separator,
+.game-event-message_light .game-event-message__check-source,
+.game-event-message_light .game-event-message__damage {
+  color: #fff;
 }
 
 .game-event-message__player {

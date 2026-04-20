@@ -1,5 +1,6 @@
 ﻿<script setup>
 import { computed, ref, watch } from "vue";
+import { useCardLeaveAnimation } from "../composables/useCardLeaveAnimation.js";
 import CardPreview from "./CardPreview.vue";
 import HandCard from "./HandCard.vue";
 import PlayZone from "./PlayZone.vue";
@@ -17,25 +18,13 @@ const isReactionTarget = computed(
     pendingReaction.value?.targetPlayerIds?.includes(roomStore.playerId),
 );
 const previewCard = ref(null);
+const { freezeLeavingCard } = useCardLeaveAnimation();
 
 watch(isReactionTarget, (isTarget) => {
   if (isTarget) {
     closePreview();
   }
 });
-
-function freezeLeavingCard(element) {
-  const cardRect = element.getBoundingClientRect();
-
-  element.style.width = `${cardRect.width}px`;
-  element.style.maxWidth = `${cardRect.width}px`;
-  element.style.height = `${cardRect.height}px`;
-  element.style.flexGrow = "0";
-  element.style.flexShrink = "0";
-  element.style.flexBasis = `${cardRect.width}px`;
-  element.style.zIndex = "20";
-  element.style.pointerEvents = "none";
-}
 
 function handleCardTap(card) {
   if (roomStore.isDiscardingCards || card.isPlayable) {
@@ -148,6 +137,9 @@ function closePreview() {
 }
 
 .hand-card-leave-active {
+  width: var(--leaving-card-width);
+  max-width: var(--leaving-card-width);
+  flex-basis: var(--leaving-card-width);
   overflow: hidden;
   transition:
     flex-basis 260ms ease 420ms,
@@ -157,9 +149,9 @@ function closePreview() {
 }
 
 .hand-card-leave-to {
-  width: 0 !important;
-  max-width: 0 !important;
-  flex-basis: 0 !important;
+  width: 0;
+  max-width: 0;
+  flex-basis: 0;
 }
 
 @keyframes hand-card-fly-away {
