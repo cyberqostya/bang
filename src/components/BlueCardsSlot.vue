@@ -1,22 +1,32 @@
-﻿<script setup>
+<script setup>
 import { computed, ref, watch } from "vue";
+import { useRoomStore } from "../stores/roomStore.js";
 import CardPreview from "./CardPreview.vue";
 import HandCard from "./HandCard.vue";
 import PlayZone from "./PlayZone.vue";
-import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
-const handCards = computed(() => roomStore.ownHand);
+const previewCard = ref(null);
 const pendingReaction = computed(
   () => roomStore.room.game?.pendingReaction || null,
 );
-const isReactionActive = computed(() => Boolean(pendingReaction.value));
+const turnCheck = computed(() => roomStore.room.game?.turnCheck || null);
 const isReactionTarget = computed(
   () =>
     pendingReaction.value?.targetPlayerId === roomStore.playerId ||
     pendingReaction.value?.targetPlayerIds?.includes(roomStore.playerId),
 );
-const previewCard = ref(null);
+const canCheckBarrel = computed(
+  () =>
+    isReactionTarget.value &&
+    ["bang", "gatling"].includes(pendingReaction.value?.sourceAction) &&
+    !pendingReaction.value?.barrelChecks?.[roomStore.playerId],
+);
+const canCheckTurnCard = computed(
+  () =>
+    turnCheck.value?.playerId === roomStore.playerId &&
+    roomStore.room.game?.turnPlayerId === roomStore.playerId,
+);
 
 watch(isReactionTarget, (isTarget) => {
   if (isTarget) {
@@ -38,14 +48,22 @@ function freezeLeavingCard(element) {
 }
 
 function handleCardTap(card) {
-  if (roomStore.isDiscardingCards || card.isPlayable) {
-    roomStore.selectCard(card.instanceId);
+  if (
+    canCheckTurnCard.value &&
+    card.instanceId === turnCheck.value?.cardInstanceId
+  ) {
+    roomStore.checkTurnBlueCard(card.instanceId);
     return;
   }
 
-  if (!roomStore.isMyTurn && !isReactionActive.value) {
-    previewCard.value = card;
+  if (card.cardId === "barrel" && canCheckBarrel.value) {
+    roomStore.checkBarrel();
+    return;
   }
+
+  if (roomStore.isMyTurn || pendingReaction.value) return;
+
+  previewCard.value = card;
 }
 
 function closePreview() {
@@ -54,43 +72,36 @@ function closePreview() {
 </script>
 
 <template>
-  <PlayZone title="Рука" variant="hand">
+  <PlayZone title="Постоянные карты" variant="hand">
     <TransitionGroup
-      class="hand-strip"
+      class="permanent-card-strip"
       name="hand-card"
       tag="div"
       :duration="{ enter: 360, leave: 680 }"
+      aria-label="Постоянные карты"
       @before-leave="freezeLeavingCard"
       @click.stop
     >
       <HandCard
-        v-for="card in handCards"
+        v-for="card in roomStore.ownPlayer?.blueCards || []"
         :key="card.instanceId"
         :card="card"
-        :is-selected="roomStore.selectedCardId === card.instanceId"
-        :is-disabled="
-          card.isBlockedByTurnRule &&
-          card.cardId !== 'bang' &&
-          !roomStore.isDiscardingCards
-        "
-        :can-select="card.isPlayable || roomStore.isDiscardingCards"
-        :is-discarding="roomStore.isDiscardingCards"
+        :is-attention="card.instanceId === turnCheck?.cardInstanceId"
         @select="handleCardTap(card)"
       />
       <span
-        v-if="handCards.length === 0"
-        key="empty-hand-spacer"
-        class="hand-strip__empty-card"
+        v-if="(roomStore.ownPlayer?.blueCards || []).length === 0"
+        key="empty-permanent-card-spacer"
+        class="permanent-card-strip__empty-card"
         aria-hidden="true"
       ></span>
     </TransitionGroup>
-
     <CardPreview v-if="previewCard" :card="previewCard" @close="closePreview" />
   </PlayZone>
 </template>
 
 <style scoped>
-.hand-strip {
+.permanent-card-strip {
   position: relative;
   display: flex;
   align-items: center;
@@ -107,21 +118,21 @@ function closePreview() {
   -webkit-overflow-scrolling: touch;
 }
 
-.hand-strip::-webkit-scrollbar {
+.permanent-card-strip::-webkit-scrollbar {
   height: 7px;
 }
 
-.hand-strip::-webkit-scrollbar-track {
+.permanent-card-strip::-webkit-scrollbar-track {
   border-radius: 999px;
   background: rgba(94, 84, 70, 0.12);
 }
 
-.hand-strip::-webkit-scrollbar-thumb {
+.permanent-card-strip::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(94, 84, 70, 0.48);
 }
 
-.hand-strip__empty-card {
+.permanent-card-strip__empty-card {
   flex: 0 0 var(--card-width);
   width: var(--card-width);
   aspect-ratio: 0.625;
@@ -173,5 +184,4 @@ function closePreview() {
     transform: translateY(-220px) rotate(-16deg) scale(0.76);
   }
 }
-
 </style>

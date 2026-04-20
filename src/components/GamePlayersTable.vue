@@ -1,10 +1,21 @@
 ﻿<script setup>
-import { computed } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { healthConfig } from "../config/healthConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
 const emit = defineEmits(["showCards"]);
+const STATUS_ARC_STEP_DEGREES = 30;
+const tableElement = ref(null);
+const statusElementsBySeatIndex = new Map();
+const turnLightAngle = ref(0);
 
 const aliveSeatIndexes = computed(() =>
   roomStore.room.seats
@@ -25,8 +36,10 @@ const seats = computed(() =>
         roomStore.selectedCard?.isPlayable &&
         seat.player.playerId !== roomStore.playerId &&
         seat.player.isAlive &&
-        isTargetInSelectedCardRange(seat),
+        isTargetAllowedForSelectedCard(seat),
       ),
+      rangeStatusStyle: getRangeStatusStyle(seat.index),
+      cardStatuses: getCardStatusesForSeat(seat),
     })),
 );
 const turnPlayer = computed(
@@ -44,10 +57,8 @@ const turnSeatIndex = computed(
 const turnLightStyle = computed(() => {
   if (turnSeatIndex.value === null) return {};
 
-  const turnAngles = [0, 45, 90, 135, 180, -135, -90, -45];
-
   return {
-    "--turn-light-angle": `${turnAngles[turnSeatIndex.value] ?? 0}deg`,
+    "--turn-light-angle": `${turnLightAngle.value}deg`,
   };
 });
 const turnPlayerLabel = computed(() => {
@@ -70,6 +81,49 @@ function getBulletImage(player) {
   return healthConfig.tableBulletImage;
 }
 
+function setStatusElement(seatIndex, element) {
+  if (element) {
+    statusElementsBySeatIndex.set(seatIndex, element);
+  } else {
+    statusElementsBySeatIndex.delete(seatIndex);
+  }
+
+  updateTurnLightAngle();
+}
+
+async function updateTurnLightAngle() {
+  await nextTick();
+
+  if (turnSeatIndex.value === null || !tableElement.value) return;
+
+  const statusElement = statusElementsBySeatIndex.get(turnSeatIndex.value);
+
+  if (!statusElement) return;
+
+  const tableRect = tableElement.value.getBoundingClientRect();
+  const statusRect = statusElement.getBoundingClientRect();
+  const tableCenterX = tableRect.left + tableRect.width / 2;
+  const tableCenterY = tableRect.top + tableRect.height / 2;
+  const statusCenterX = statusRect.left + statusRect.width / 2;
+  const statusCenterY = statusRect.top + statusRect.height / 2;
+  const deltaX = statusCenterX - tableCenterX;
+  const deltaY = statusCenterY - tableCenterY;
+
+  turnLightAngle.value = Math.atan2(deltaX, -deltaY) * (180 / Math.PI);
+}
+
+watch(turnSeatIndex, () => updateTurnLightAngle());
+watch(seats, () => updateTurnLightAngle(), { flush: "post" });
+
+onMounted(() => {
+  updateTurnLightAngle();
+  window.addEventListener("resize", updateTurnLightAngle);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", updateTurnLightAngle);
+});
+
 function isSheriff(player) {
   return player.role?.id === "sheriff";
 }
@@ -77,13 +131,40 @@ function isSheriff(player) {
 function isTargetInSelectedCardRange(seat) {
   if (!roomStore.selectedCard?.usesWeaponRange) return true;
 
-  const distance = getDistanceFromOwnSeat(seat.index);
+  const distance = getDistanceFromOwnSeat(seat);
 
   return distance > 0 && distance <= (roomStore.ownPlayer?.attackRange || 1);
 }
 
-function getDistanceFromOwnSeat(targetSeatIndex) {
+function isTargetAllowedForSelectedCard(seat) {
+  const selectedCard = roomStore.selectedCard;
+
+  if (!selectedCard) return false;
+  if (!isTargetInSelectedCardRange(seat)) return false;
+
+  if (selectedCard.action !== "playBlueCardOnTarget") return true;
+  if (hasBlueCard(seat.player, selectedCard.cardId)) return false;
+  if (selectedCard.cardId === "jail" && seat.player.role?.id === "sheriff") {
+    return false;
+  }
+  if (selectedCard.cardId === "dynamite" && isDynamiteInPlay()) return false;
+
+  return true;
+}
+
+function hasBlueCard(player, cardId) {
+  return Boolean(
+    (player.blueCards || []).some((card) => card.cardId === cardId),
+  );
+}
+
+function isDynamiteInPlay() {
+  return roomStore.players.some((player) => hasBlueCard(player, "dynamite"));
+}
+
+function getDistanceFromOwnSeat(targetSeat) {
   const ownSeatIndex = roomStore.ownPlayer?.seatIndex;
+  const targetSeatIndex = targetSeat.index;
   const ownPosition = aliveSeatIndexes.value.indexOf(ownSeatIndex);
   const targetPosition = aliveSeatIndexes.value.indexOf(targetSeatIndex);
 
@@ -96,11 +177,72 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   }
 
   const directDistance = Math.abs(ownPosition - targetPosition);
-
-  return Math.min(
+  const baseDistance = Math.min(
     directDistance,
     aliveSeatIndexes.value.length - directDistance,
   );
+  const distanceModifier =
+    getDistanceModifierFromSelf(roomStore.ownPlayer) +
+    getDistanceModifierToSelf(targetSeat.player);
+
+  return Math.max(1, baseDistance + distanceModifier);
+}
+
+function getDistanceModifierFromSelf(player) {
+  return (player?.blueCards || []).reduce(
+    (modifier, card) => modifier + (card.distanceModifierFromSelf || 0),
+    0,
+  );
+}
+
+function getDistanceModifierToSelf(player) {
+  return (player?.blueCards || []).reduce(
+    (modifier, card) => modifier + (card.distanceModifierToSelf || 0),
+    0,
+  );
+}
+
+function getRangeStatusValue(player) {
+  return (
+    (player.attackRange || 1) +
+    (player.blueCards || []).reduce(
+      (bonus, card) => bonus + (card.rangeStatusBonus || 0),
+      0,
+    )
+  );
+}
+
+function getCardStatusesForSeat(seat) {
+  return (seat.player.statuses || []).map((status, index) => ({
+    ...status,
+    style: getStatusStyle(seat.index, getCardStatusStep(index)),
+  }));
+}
+
+function getRangeStatusStyle(seatIndex) {
+  return getStatusStyle(seatIndex, 1);
+}
+
+function getCardStatusStep(index) {
+  const distanceFromHealth = Math.floor(index / 2) + 1;
+
+  return index % 2 === 0 ? -distanceFromHealth : distanceFromHealth + 1;
+}
+
+function getStatusStyle(seatIndex, step) {
+  const angle =
+    getHealthStatusAngle(seatIndex) + step * STATUS_ARC_STEP_DEGREES;
+  const radians = (angle * Math.PI) / 180;
+  const x = Number(Math.cos(radians).toFixed(3));
+  const y = Number(Math.sin(radians).toFixed(3));
+
+  return {
+    transform: `translate(-50%, -50%) translate(calc(${x} * var(--status-radius)), calc(${y} * var(--status-radius)))`,
+  };
+}
+
+function getHealthStatusAngle(seatIndex) {
+  return -90 + ((seatIndex + 4) % 8) * 45;
 }
 
 function handleSeatClick(seat) {
@@ -116,7 +258,11 @@ function handleSeatClick(seat) {
 </script>
 
 <template>
-  <section class="game-players-table" aria-label="Игроки за столом">
+  <section
+    ref="tableElement"
+    class="game-players-table"
+    aria-label="Игроки за столом"
+  >
     <span
       v-if="turnSeatIndex !== null"
       class="game-players-table__turn-light"
@@ -145,7 +291,11 @@ function handleSeatClick(seat) {
       :disabled="!seat.isTargetable && !seat.isOwn"
       @click.stop="handleSeatClick(seat)"
     >
-      <span class="game-seat__statuses" aria-hidden="true">
+      <span
+        :ref="(element) => setStatusElement(seat.index, element)"
+        class="game-seat__statuses"
+        aria-hidden="true"
+      >
         <span v-if="seat.player.health > 0" class="game-seat__health">
           <img
             v-for="point in seat.player.health"
@@ -154,8 +304,17 @@ function handleSeatClick(seat) {
             alt=""
           />
         </span>
-        <span class="game-seat__range">
-          <span>{{ seat.player.attackRange || 1 }}</span>
+        <span class="game-seat__range" :style="seat.rangeStatusStyle">
+          <span>{{ getRangeStatusValue(seat.player) }}</span>
+        </span>
+        <span
+          v-for="status in seat.cardStatuses"
+          :key="status.cardId"
+          class="game-seat__card-status"
+          :style="status.style"
+          :title="status.title"
+        >
+          <img :src="status.image" :alt="status.title" />
         </span>
       </span>
       <span
@@ -317,8 +476,8 @@ function handleSeatClick(seat) {
   top: 50%;
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border: 1px solid #5e5446;
   border-radius: 50%;
   transform: translate(-50%, -50%);
@@ -353,10 +512,31 @@ function handleSeatClick(seat) {
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  color: var(--muted);
+  color: var(--ink);
   font-size: 16px;
-  font-weight: 700;
-  line-height: 1;
+  font-weight: 600;
+  line-height: 0;
+}
+
+.game-seat__card-status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%)
+    translate(
+      calc(var(--card-status-x, 0) * var(--status-radius)),
+      calc(var(--card-status-y, -1) * var(--status-radius))
+    );
+}
+
+.game-seat__card-status img {
+  display: block;
+  width: 100%;
+  object-fit: contain;
 }
 
 .game-seat__reticle {
@@ -420,7 +600,7 @@ function handleSeatClick(seat) {
 .game-seat__name {
   line-height: 1;
   white-space: nowrap;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 500;
 }
 

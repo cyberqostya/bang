@@ -4,7 +4,9 @@ import AppHeader from "../components/AppHeader.vue";
 import AppScreen from "../components/AppScreen.vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
+import BlueCardsSlot from "../components/BlueCardsSlot.vue";
 import BulletStack from "../components/BulletStack.vue";
+import CardPreview from "../components/CardPreview.vue";
 import CharacterSlot from "../components/CharacterSlot.vue";
 import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
@@ -16,16 +18,20 @@ import { useRoomStore } from "../stores/roomStore.js";
 const roomStore = useRoomStore();
 const viewMode = ref("cards");
 const eventFeedElement = ref(null);
+const eventPreviewCard = ref(null);
 const isApplyingCardOnPlayers = ref(false);
 const isLeaveGameDialogOpen = ref(false);
 const isTurnNoticeOpen = ref(false);
+const turnCheckNotice = ref(null);
 const isDeathNoticeAccepted = ref(false);
 const activePhaseIndex = ref(0);
 const wasDiscardingCards = ref(false);
 const wasReactionParticipant = ref(false);
+const lastShownTurnCheckEventId = ref("");
 const reactionNow = ref(Date.now());
 const finishDelayLeft = ref(0);
 let reactionCountdownTimer = null;
+let turnCheckNoticeTimer = null;
 const REACTION_WINDOW_MS = 5 * 1000;
 const gameEvents = computed(() => roomStore.room.game?.events || []);
 const pendingReaction = computed(
@@ -42,6 +48,9 @@ const isReactionActor = computed(
 const shouldShowReactionOverlay = computed(
   () => isReactionTarget.value || isReactionActor.value,
 );
+const shouldShowTurnCheckNotice = computed(
+  () => Boolean(turnCheckNotice.value) && !shouldShowReactionOverlay.value,
+);
 const reactionNoticeCardTitle = computed(
   () => pendingReaction.value?.cardTitle || "БЭНГ",
 );
@@ -49,7 +58,12 @@ const reactionNoticeColor = computed(
   () => pendingReaction.value?.cardColor || "#c94a35",
 );
 const reactionActorPrompt = computed(
-  () => pendingReaction.value?.actorPendingPrompt || "Ожидаем реакцию жертвы на",
+  () =>
+    `Ожидание реакции ${
+      (pendingReaction.value?.targetPlayerIds?.length || 0) > 1
+        ? "жертв"
+        : "жертвы"
+    } на`,
 );
 const reactionCountdown = computed(() => {
   if (!pendingReaction.value?.expiresAt) return 0;
@@ -75,6 +89,9 @@ const reactionProgressStyle = computed(() => ({
   backgroundColor: reactionNoticeColor.value,
   transform: `scaleX(${reactionTimeLeftRatio.value})`,
 }));
+const barrelCheckFailure = computed(
+  () => pendingReaction.value?.barrelChecks?.[roomStore.playerId] || null,
+);
 const turnNoticePlayerLabel = computed(() => {
   const ownPlayer = roomStore.ownPlayer;
 
@@ -93,15 +110,20 @@ const canFinishGameRoom = computed(
 const canUseDrawPhase = computed(
   () =>
     roomStore.isMyTurn &&
+    !isOwnTurnCheck.value &&
     !roomStore.room.game?.turnDrawTaken &&
     !roomStore.room.game?.turnActionTaken,
 );
 const isPlayPhaseDisabled = computed(
   () =>
     !roomStore.isMyTurn ||
+    isOwnTurnCheck.value ||
     roomStore.isDiscardingCards ||
     activePhaseIndex.value > 0 ||
     Boolean(roomStore.room.game?.turnActionTaken),
+);
+const isOwnTurnCheck = computed(
+  () => roomStore.room.game?.turnCheck?.playerId === roomStore.playerId,
 );
 const isHeaderSwitchDisabled = computed(
   () => viewMode.value === "cards" && roomStore.isDiscardingCards,
@@ -203,7 +225,10 @@ watch(
 
 watch(
   () => gameEvents.value.map((event) => event.id).join(","),
-  () => scrollEventsToBottom(),
+  () => {
+    scrollEventsToBottom();
+    showOwnTurnCheckNotice();
+  },
 );
 
 watch(viewMode, (mode) => {
@@ -242,14 +267,23 @@ watch(
 
 watch(
   currentTurnPlayerId,
-  (turnPlayerId) => {
-    if (
-      roomStore.room.status !== "game" ||
-      roomStore.room.game?.winner ||
-      turnPlayerId !== roomStore.playerId
-    ) {
+  (turnPlayerId, previousTurnPlayerId) => {
+    if (roomStore.room.status !== "game" || roomStore.room.game?.winner) {
       return;
     }
+
+    if (
+      previousTurnPlayerId === roomStore.playerId &&
+      turnPlayerId !== roomStore.playerId
+    ) {
+      viewMode.value = "players";
+      roomStore.cancelSelectedCard();
+      closeEventPreview();
+      activePhaseIndex.value = 0;
+      return;
+    }
+
+    if (turnPlayerId !== roomStore.playerId) return;
 
     viewMode.value = "cards";
     roomStore.cancelSelectedCard();
@@ -297,6 +331,7 @@ watch(
     if (isReactionTarget.value) {
       viewMode.value = "cards";
       roomStore.cancelSelectedCard();
+      closeEventPreview();
     } else if (wasParticipant && !isReactionActor.value) {
       viewMode.value = "players";
     }
@@ -307,17 +342,27 @@ watch(
   },
 );
 
+watch(isReactionTarget, (isTarget) => {
+  if (isTarget) {
+    closeEventPreview();
+  }
+});
+
 watch(
   () => roomStore.ownPlayer?.isAlive,
   (isAlive) => {
     if (isAlive !== false) {
       isDeathNoticeAccepted.value = false;
+      return;
     }
+
+    clearTurnCheckNotice();
   },
 );
 
 onBeforeUnmount(() => {
   window.clearInterval(reactionCountdownTimer);
+  window.clearTimeout(turnCheckNoticeTimer);
 });
 
 function toggleViewMode() {
@@ -338,6 +383,56 @@ function showCardsView() {
   }
 
   viewMode.value = "cards";
+}
+
+function openEventPreview(card) {
+  if (isReactionTarget.value) return;
+
+  eventPreviewCard.value = card;
+}
+
+function closeEventPreview() {
+  eventPreviewCard.value = null;
+}
+
+function showOwnTurnCheckNotice() {
+  const latestTurnCheckEvent = [...gameEvents.value]
+    .reverse()
+    .find((event) => event.type === "turnCheck");
+
+  if (
+    !latestTurnCheckEvent ||
+    latestTurnCheckEvent.id === lastShownTurnCheckEventId.value ||
+    latestTurnCheckEvent.actorPlayerId !== roomStore.playerId
+  ) {
+    return;
+  }
+
+  if (
+    pendingReaction.value?.sourceAction === "dynamite" &&
+    isReactionTarget.value
+  ) {
+    lastShownTurnCheckEventId.value = latestTurnCheckEvent.id;
+    clearTurnCheckNotice();
+    return;
+  }
+
+  if (roomStore.ownPlayer?.isAlive === false) {
+    lastShownTurnCheckEventId.value = latestTurnCheckEvent.id;
+    clearTurnCheckNotice();
+    return;
+  }
+
+  turnCheckNotice.value = latestTurnCheckEvent;
+  lastShownTurnCheckEventId.value = latestTurnCheckEvent.id;
+  window.clearTimeout(turnCheckNoticeTimer);
+  turnCheckNoticeTimer = window.setTimeout(clearTurnCheckNotice, 5000);
+}
+
+function clearTurnCheckNotice() {
+  window.clearTimeout(turnCheckNoticeTimer);
+  turnCheckNoticeTimer = null;
+  turnCheckNotice.value = null;
 }
 
 async function scrollEventsToBottom() {
@@ -396,7 +491,7 @@ function getDeputyVictorySegments(deputies) {
 }
 
 function handleDiscardPhase() {
-  if (!roomStore.isMyTurn) return;
+  if (!roomStore.isMyTurn || isOwnTurnCheck.value) return;
 
   activePhaseIndex.value = 2;
 
@@ -410,7 +505,12 @@ function handleDiscardPhase() {
 }
 
 function handlePlayPhase() {
-  if (!roomStore.isMyTurn || roomStore.isDiscardingCards) return;
+  if (
+    !roomStore.isMyTurn ||
+    roomStore.isDiscardingCards ||
+    isOwnTurnCheck.value
+  )
+    return;
 
   activePhaseIndex.value = Math.max(activePhaseIndex.value, 1);
 }
@@ -461,7 +561,10 @@ function handleDrawPhase() {
             :class="{ 'event-feed__message_turn': event.type === 'turn' }"
           >
             <span class="event-feed__text">
-              <GameEventMessage :event="event" />
+              <GameEventMessage
+                :event="event"
+                @preview-card="openEventPreview"
+              />
             </span>
             <time v-if="event.createdAt" class="event-feed__time">
               {{ formatMessageTime(event.createdAt) }}
@@ -513,7 +616,11 @@ function handleDrawPhase() {
           <button
             class="turn-phase-button"
             type="button"
-            :disabled="!roomStore.isMyTurn || roomStore.isDiscardingCards"
+            :disabled="
+              !roomStore.isMyTurn ||
+              roomStore.isDiscardingCards ||
+              isOwnTurnCheck
+            "
             @click.stop="handleDiscardPhase"
           >
             Сброс
@@ -521,7 +628,13 @@ function handleDrawPhase() {
         </div>
       </PlayZone>
 
-      <PlayZone title="Стол" variant="table">
+      <div
+        v-if="roomStore.room.status === 'game'"
+        class="cards-view__future-space"
+        aria-hidden="true"
+      ></div>
+
+      <PlayZone title="Планшет игрока" variant="table">
         <div class="table-main">
           <BulletStack />
           <div class="table-cards">
@@ -531,6 +644,8 @@ function handleDrawPhase() {
           </div>
         </div>
       </PlayZone>
+
+      <BlueCardsSlot />
 
       <BottomPanel />
     </section>
@@ -605,30 +720,83 @@ function handleDrawPhase() {
           class="reaction-notice__progress"
           :style="reactionProgressStyle"
         ></span>
-        <p class="reaction-notice__text">
+        <div class="reaction-notice__copy">
+          <p class="reaction-notice__text">
+            <template v-if="isReactionTarget">
+              <span>Вы стали целью </span>
+              <span
+                class="reaction-notice__card"
+                :style="{ color: reactionNoticeColor }"
+              >
+                [{{ reactionNoticeCardTitle }}]
+              </span>
+              <span>.</span>
+            </template>
+            <template v-else>
+              <span>{{ reactionActorPrompt }} </span>
+              <span
+                class="reaction-notice__card"
+                :style="{ color: reactionNoticeColor }"
+              >
+                [{{ reactionNoticeCardTitle }}]
+              </span>
+            </template>
+          </p>
           <template v-if="isReactionTarget">
-            <span>Вы стали целью </span>
-            <span
-              class="reaction-notice__card"
-              :style="{ color: reactionNoticeColor }"
-            >
-              [{{ reactionNoticeCardTitle }}]
-            </span>
-            <span>. Время на вашу реакцию:</span>
+            <p class="reaction-notice__subtext">
+              До потери здоровья осталось ->
+            </p>
           </template>
-          <template v-else>
-            <span>{{ reactionActorPrompt }} </span>
-            <span
-              class="reaction-notice__card"
-              :style="{ color: reactionNoticeColor }"
-            >
-              [{{ reactionNoticeCardTitle }}]
+          <p
+            v-if="isReactionTarget && barrelCheckFailure"
+            class="reaction-notice__subtext reaction-notice__check-text"
+          >
+            <span>Проверка {{ barrelCheckFailure.checkCardTitle }}</span>
+            <span> -- {{ barrelCheckFailure.resultTitle }}</span>
+            <span> -- вытянул карту </span>
+            <span class="reaction-notice__check-card">
+              <span>"</span>
+              <span
+                :style="{ color: barrelCheckFailure.drawnCard?.suit?.color }"
+              >
+                {{ barrelCheckFailure.drawnCard?.title }}
+              </span>
+              <span>-</span>
+              <span
+                class="reaction-notice__check-rank"
+                :style="{ color: barrelCheckFailure.drawnCard?.suit?.color }"
+              >
+                {{ barrelCheckFailure.drawnCard?.rank?.label }}
+              </span>
+              <img
+                class="reaction-notice__check-suit"
+                :src="barrelCheckFailure.drawnCard?.suit?.image"
+                :alt="barrelCheckFailure.drawnCard?.suit?.label"
+              />
+              <span>"</span>
             </span>
-          </template>
-        </p>
+            <span v-if="barrelCheckFailure.consequenceText">
+              -- {{ barrelCheckFailure.consequenceText }}
+            </span>
+          </p>
+        </div>
         <span class="reaction-notice__count">
           {{ reactionCountdown }}
         </span>
+      </section>
+    </Transition>
+
+    <Transition name="reaction-notice">
+      <section
+        v-if="shouldShowTurnCheckNotice"
+        class="reaction-notice reaction-notice_check"
+        aria-live="assertive"
+      >
+        <div class="reaction-notice__copy">
+          <p class="reaction-notice__subtext reaction-notice__check-text">
+            <GameEventMessage :event="turnCheckNotice" />
+          </p>
+        </div>
       </section>
     </Transition>
 
@@ -663,6 +831,11 @@ function handleDrawPhase() {
         </button>
       </div>
     </div>
+    <CardPreview
+      v-if="eventPreviewCard"
+      :card="eventPreviewCard"
+      @close="closeEventPreview"
+    />
   </AppScreen>
 </template>
 
@@ -696,14 +869,14 @@ function handleDrawPhase() {
 
 .cards-view {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   min-width: 0;
   min-height: 0;
   padding-bottom: 5px;
 }
 
 .cards-view_with-phases {
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(24px, 1fr) auto auto auto;
 }
 
 .players-view {
@@ -820,6 +993,11 @@ function handleDrawPhase() {
   color: var(--muted);
   white-space: nowrap;
   font-size: 12px;
+}
+
+.cards-view__future-space {
+  min-width: 0;
+  min-height: 24px;
 }
 
 .table-main {
@@ -979,6 +1157,25 @@ function handleDrawPhase() {
   color: #fff;
 }
 
+.reaction-notice_check {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reaction-notice_check :deep(.game-event-message),
+.reaction-notice_check :deep(.game-event-message__player),
+.reaction-notice_check :deep(.game-event-message__separator),
+.reaction-notice_check :deep(.game-event-message__check-source),
+.reaction-notice_check :deep(.game-event-message__damage) {
+  color: #fff !important;
+}
+
+.reaction-notice_check :deep(.game-event-message__check-drawn) {
+  border-radius: 6px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.94);
+  text-shadow: none;
+}
+
 .reaction-notice__progress {
   position: absolute;
   left: 0;
@@ -987,6 +1184,12 @@ function handleDrawPhase() {
   height: 5px;
   transform-origin: left center;
   transition: transform 180ms linear;
+}
+
+.reaction-notice__copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
 }
 
 .reaction-notice__text {
@@ -1002,6 +1205,42 @@ function handleDrawPhase() {
 .reaction-notice__card {
   font-weight: 800;
   white-space: nowrap;
+}
+
+.reaction-notice__subtext {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  text-wrap: balance;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+
+.reaction-notice__check-text {
+  color: #fff;
+  line-height: 1.3;
+}
+
+.reaction-notice__check-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: baseline;
+  border-radius: 6px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.94);
+  text-shadow: none;
+}
+
+.reaction-notice__check-rank {
+  font-weight: 800;
+}
+
+.reaction-notice__check-suit {
+  width: auto;
+  height: 0.9em;
+  object-fit: contain;
 }
 
 .reaction-notice__count {

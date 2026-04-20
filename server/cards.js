@@ -62,7 +62,7 @@ export const cardConfig = {
     playMode: "instant",
     eventColor: "#FFBF00",
     action: "beer",
-    reactionTo: ["bang", "gatling", "indians"],
+    reactionTo: ["bang", "gatling", "indians", "dynamite"],
     reactionOnLethalHealthLoss: true,
     needsTarget: false,
     disposable: true,
@@ -167,6 +167,71 @@ export const cardConfig = {
     needsTarget: false,
     disposable: false,
     weaponRange: 1,
+  },
+  scope: {
+    id: "scope",
+    title: "Scope",
+    eventTitle: "Прицел",
+    image: "/images/cards/scope.webp",
+    playMode: "permanent",
+    eventColor: "#123c75",
+    action: "playBlueCard",
+    needsTarget: false,
+    disposable: false,
+    statusImage: "/images/statuses/scope.webp",
+    distanceModifierFromSelf: -1,
+    rangeStatusBonus: 1,
+  },
+  mustang: {
+    id: "mustang",
+    title: "Mustang",
+    eventTitle: "Мустанг",
+    image: "/images/cards/mustang.webp",
+    playMode: "permanent",
+    eventColor: "#123c75",
+    action: "playBlueCard",
+    needsTarget: false,
+    disposable: false,
+    statusImage: "/images/statuses/mustang.webp",
+    distanceModifierToSelf: 1,
+  },
+  barrel: {
+    id: "barrel",
+    title: "Barrel",
+    eventTitle: "Бочка",
+    image: "/images/cards/barrel.webp",
+    playMode: "permanent",
+    eventColor: "#123c75",
+    action: "playBlueCard",
+    needsTarget: false,
+    disposable: false,
+    statusImage: "/images/statuses/barrel.webp",
+  },
+  jail: {
+    id: "jail",
+    title: "Jail",
+    eventTitle: "Тюрьма",
+    image: "/images/cards/jail.webp",
+    playMode: "permanent",
+    eventColor: "#123c75",
+    action: "playBlueCardOnTarget",
+    selectionView: "players",
+    needsTarget: true,
+    disposable: false,
+    statusImage: "/images/statuses/jail.webp",
+  },
+  dynamite: {
+    id: "dynamite",
+    title: "Dynamite",
+    eventTitle: "Динамит",
+    image: "/images/cards/dynamite.webp",
+    playMode: "permanent",
+    eventColor: "#123c75",
+    action: "playBlueCardOnTarget",
+    selectionView: "players",
+    needsTarget: true,
+    disposable: false,
+    statusImage: "/images/statuses/dynamite.webp",
   },
 };
 
@@ -285,6 +350,18 @@ const weaponCards = [
   ["volcanic", "10s"],
 ];
 
+const blueCards = [
+  ["scope", "As"],
+  ["mustang", "8h"],
+  ["mustang", "9h"],
+  ["barrel", "Ks"],
+  ["barrel", "Qs"],
+  ["jail", "4h"],
+  ["jail", "Js"],
+  ["jail", "10s"],
+  ["dynamite", "2h"],
+];
+
 export function createDeck() {
   return [
     ...bangCards.map((cardCode, index) =>
@@ -312,6 +389,9 @@ export function createDeck() {
       createDeckCard("wellsfargo", cardCode, index),
     ),
     ...weaponCards.map(([cardId, cardCode], index) =>
+      createDeckCard(cardId, cardCode, index),
+    ),
+    ...blueCards.map(([cardId, cardCode], index) =>
       createDeckCard(cardId, cardCode, index),
     ),
   ];

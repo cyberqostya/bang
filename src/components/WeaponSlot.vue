@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import CardPreview from "./CardPreview.vue";
 import GameCardVisual from "./GameCardVisual.vue";
 import { useRoomStore } from "../stores/roomStore.js";
@@ -7,12 +7,24 @@ import { useRoomStore } from "../stores/roomStore.js";
 const roomStore = useRoomStore();
 const weapon = computed(() => roomStore.ownPlayer?.weapon || null);
 const attackRange = computed(() => roomStore.ownPlayer?.attackRange || 1);
+const pendingReaction = computed(
+  () => roomStore.room.game?.pendingReaction || null,
+);
+const isReactionActive = computed(() => Boolean(pendingReaction.value));
+const isReactionTarget = computed(
+  () =>
+    pendingReaction.value?.targetPlayerId === roomStore.playerId ||
+    pendingReaction.value?.targetPlayerIds?.includes(roomStore.playerId),
+);
 const isPreviewOpen = ref(false);
 const canPreviewWeapon = computed(
-  () => Boolean(weapon.value) && !roomStore.isMyTurn,
+  () => Boolean(weapon.value) && !roomStore.isMyTurn && !isReactionActive.value,
 );
 const canActivateWeaponProperty = computed(
-  () => Boolean(weapon.value?.propertyAction) && roomStore.isMyTurn,
+  () =>
+    Boolean(weapon.value?.propertyAction) &&
+    roomStore.isMyTurn &&
+    !isReactionActive.value,
 );
 const isWeaponPropertyActive = computed(() => {
   const effectLimitKey = weapon.value?.propertyEffectLimitKey;
@@ -20,6 +32,12 @@ const isWeaponPropertyActive = computed(() => {
   if (!effectLimitKey) return false;
 
   return Boolean(roomStore.ownPlayer?.activeEffectAllowances?.[effectLimitKey]);
+});
+
+watch(isReactionTarget, (isTarget) => {
+  if (isTarget) {
+    closePreview();
+  }
 });
 
 function handleWeaponTap() {

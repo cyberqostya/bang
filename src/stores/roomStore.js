@@ -65,6 +65,9 @@ export const useRoomStore = defineStore("room", () => {
       Boolean(ownPlayer.value) &&
       ownHand.value.length > ownPlayer.value.health,
   );
+  const hasOwnTurnCheck = computed(
+    () => room.value.game?.turnCheck?.playerId === playerId.value,
+  );
   const selectedCard = computed(
     () =>
       ownHand.value.find((card) => card.instanceId === selectedCardId.value) ||
@@ -218,6 +221,8 @@ export const useRoomStore = defineStore("room", () => {
       return;
     }
 
+    if (hasOwnTurnCheck.value) return;
+
     const card = ownHand.value.find(
       (candidate) => candidate.instanceId === cardInstanceId,
     );
@@ -268,6 +273,19 @@ export const useRoomStore = defineStore("room", () => {
   function activateWeaponProperty() {
     send("game:action", {
       action: "activateWeaponProperty",
+    });
+  }
+
+  function checkBarrel() {
+    send("game:action", {
+      action: "checkBarrel",
+    });
+  }
+
+  function checkTurnBlueCard(cardInstanceId) {
+    send("game:action", {
+      action: "checkTurnBlueCard",
+      cardInstanceId,
     });
   }
 
@@ -425,6 +443,7 @@ export const useRoomStore = defineStore("room", () => {
     connectionStatus,
     error,
     hasRoom,
+    hasOwnTurnCheck,
     isConnected,
     isHost,
     isDiscardingCards,
@@ -443,6 +462,8 @@ export const useRoomStore = defineStore("room", () => {
     wsUrl,
     cancelSelectedCard,
     activateWeaponProperty,
+    checkBarrel,
+    checkTurnBlueCard,
     closeRoom,
     connect,
     createRoom,

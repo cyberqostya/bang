@@ -431,6 +431,7 @@ export function startGameServer() {
       leftGame: false,
       hand: [],
       weapon: null,
+      blueCards: [],
     };
   }
 
@@ -515,16 +516,22 @@ export function startGameServer() {
     }
 
     if (room.game.pendingReaction) {
-      if (
-        payload.action === "missed" ||
-        payload.action === "beer" ||
-        payload.action === "bang"
-      ) {
+      if (payload.action === "checkBarrel") {
+        checkBarrelReaction(client, room);
+        return;
+      }
+
+      if (["missed", "beer", "bang"].includes(payload.action)) {
         playReactionAction(client, room, payload);
         return;
       }
 
       sendError(client.socket, "Ждем реакцию");
+      return;
+    }
+
+    if (payload.action === "checkTurnBlueCard") {
+      checkTurnBlueCard(client, room, payload);
       return;
     }
 
@@ -576,6 +583,11 @@ export function startGameServer() {
       return;
     }
 
+    if (hasRequiredTurnCheck(room, client.playerId)) {
+      sendError(client.socket, "Сначала проверьте карту на столе");
+      return;
+    }
+
     if (actor.hand.length > actor.health) {
       sendError(client.socket, `Сбросьте лишние карты до ${actor.health}`);
       return;
@@ -604,6 +616,11 @@ export function startGameServer() {
   }
 
   function drawPhase(client, room) {
+    if (hasRequiredTurnCheck(room, client.playerId)) {
+      sendError(client.socket, "Сначала проверьте карту на столе");
+      return;
+    }
+
     if (room.game.turnDrawTaken) {
       sendError(client.socket, "Фаза набора уже была");
       return;
@@ -620,6 +637,11 @@ export function startGameServer() {
   }
 
   function discardCardFromHand(client, room, payload = {}) {
+    if (hasRequiredTurnCheck(room, client.playerId)) {
+      sendError(client.socket, "Сначала проверьте карту на столе");
+      return;
+    }
+
     const actor = room.seats.find(
       (seat) => seat.player?.playerId === client.playerId,
     )?.player;
@@ -658,6 +680,11 @@ export function startGameServer() {
   }
 
   function playCardAction(client, room, payload = {}) {
+    if (hasRequiredTurnCheck(room, client.playerId)) {
+      sendError(client.socket, "Сначала проверьте карту на столе");
+      return;
+    }
+
     const actor = room.seats.find(
       (seat) => seat.player?.playerId === client.playerId,
     )?.player;
@@ -723,6 +750,12 @@ export function startGameServer() {
         actorRoleId: actor.roleId,
         cardTitle: getCardEventTitle(card),
         cardColor: configForCard.eventColor,
+        previewCard: getReactionEventPreviewCard(
+          room,
+          actor,
+          card,
+          configForCard,
+        ),
         targetName: result.targetPlayer.name,
         targetRoleId: result.targetPlayer.roleId,
       });
@@ -836,6 +869,47 @@ export function startGameServer() {
       return;
     }
 
+    if (payload.action === "playBlueCard") {
+      if (hasBlueCardInPlay(actor, card.cardId)) {
+        sendError(client.socket, "Такая карта уже на столе");
+        return;
+      }
+
+      playBlueCard(actor, card);
+      actor.hand.splice(cardIndex, 1);
+      markTurnActionTaken(room);
+      addCardOnlyEvent(room, actor, card, configForCard);
+      broadcastRoom(room.id);
+      return;
+    }
+
+    if (payload.action === "playBlueCardOnTarget") {
+      const result = playBlueCardOnTarget(
+        client,
+        room,
+        actor,
+        card,
+        configForCard,
+        payload,
+      );
+
+      if (!result) return;
+
+      actor.hand.splice(cardIndex, 1);
+      markTurnActionTaken(room);
+      addGameEvent(room, {
+        type: "card",
+        actorName: actor.name,
+        actorRoleId: actor.roleId,
+        cardTitle: getCardEventTitle(card),
+        cardColor: configForCard.eventColor,
+        targetName: result.targetPlayer.name,
+        targetRoleId: result.targetPlayer.roleId,
+      });
+      broadcastRoom(room.id);
+      return;
+    }
+
     if (configForCard.effectLimitKey) {
       if (usesEffectAllowance) {
         consumeTurnEffectAllowance(
@@ -911,7 +985,19 @@ export function startGameServer() {
       actorRoleId: actor.roleId,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
+      previewCard: getReactionEventPreviewCard(
+        room,
+        actor,
+        card,
+        configForCard,
+      ),
     });
+  }
+
+  function getReactionEventPreviewCard(room, actor, card, configForCard) {
+    if (!configForCard?.targetPrompt || card.cardId === "bang") return null;
+
+    return getPublicCard(room, actor, card, { includePlayState: false });
   }
 
   function addGroupHealEvent(room, players, configForCard) {
@@ -977,6 +1063,11 @@ export function startGameServer() {
   }
 
   function activateWeaponProperty(client, room) {
+    if (hasRequiredTurnCheck(room, client.playerId)) {
+      sendError(client.socket, "Сначала проверьте карту на столе");
+      return;
+    }
+
     const actor = room.seats.find(
       (seat) => seat.player?.playerId === client.playerId,
     )?.player;
@@ -1080,6 +1171,7 @@ export function startGameServer() {
       targetPlayerIds,
       targetPlayerId: reaction.targetPlayerId || targetPlayerIds[0] || null,
       healthLoss: reaction.healthLoss || 1,
+      barrelChecks: {},
       expiresAt: Date.now() + config.reactionWindowMs,
     };
     room.pendingReactionTimer = setTimeout(() => {
@@ -1113,11 +1205,23 @@ export function startGameServer() {
       });
 
     checkVictory(room);
+
+    const turnPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === room.game.turnPlayerId,
+    )?.player;
+
+    if (turnPlayer && !turnPlayer.isAlive && !room.game.winner) {
+      completeTurn(room, turnPlayer.playerId);
+    }
+
     broadcastRoom(room.id);
   }
 
-  function applyHealthLoss(room, player, amount = 1) {
+  function applyHealthLoss(room, player, amount = 1, options = {}) {
     player.health = Math.max(0, player.health - amount);
+
+    if (options.silent) return;
+
     addGameEvent(room, {
       type: "healthLoss",
       playerName: player.name,
@@ -1165,10 +1269,204 @@ export function startGameServer() {
       ...pendingReaction,
       targetPlayerIds: nextTargetPlayerIds,
       targetPlayerId: nextTargetPlayerIds[0],
+      barrelChecks: Object.fromEntries(
+        Object.entries(pendingReaction.barrelChecks || {}).filter(
+          ([targetPlayerId]) => nextTargetPlayerIds.includes(targetPlayerId),
+        ),
+      ),
       targetPlayers: pendingReaction.targetPlayers?.filter((targetPlayer) =>
         nextTargetPlayerIds.includes(targetPlayer.playerId),
       ),
     };
+  }
+
+  function checkBarrelReaction(client, room) {
+    const pendingReaction = room.game.pendingReaction;
+
+    if (
+      !pendingReaction ||
+      !isPendingReactionTarget(pendingReaction, client.playerId)
+    ) {
+      sendError(client.socket, "Сейчас нельзя проверить бочку");
+      return;
+    }
+
+    if (!isBarrelAllowedForReaction(pendingReaction)) {
+      sendError(client.socket, "Бочка не спасает от этой карты");
+      return;
+    }
+
+    const targetPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+
+    if (!hasBlueCardInPlay(targetPlayer, "barrel")) {
+      sendError(client.socket, "Бочки нет на столе");
+      return;
+    }
+
+    if (pendingReaction.barrelChecks?.[client.playerId]) {
+      sendError(client.socket, "Бочку уже проверяли");
+      return;
+    }
+
+    const drawnCard = drawCheckCard(room);
+
+    if (!drawnCard) {
+      sendError(client.socket, "Колода пуста");
+      return;
+    }
+
+    const isSuccess = drawnCard.suit?.id === "hearts";
+
+    room.game.discard.push(drawnCard);
+
+    if (isSuccess) {
+      addBarrelCheckEvent(room, targetPlayer, drawnCard, true);
+      completePendingReactionTarget(room, client.playerId);
+      broadcastRoom(room.id);
+      return;
+    }
+
+    room.game.pendingReaction = {
+      ...pendingReaction,
+      barrelChecks: {
+        ...(pendingReaction.barrelChecks || {}),
+        [client.playerId]: getBarrelCheckResult(drawnCard, false),
+      },
+    };
+    addBarrelCheckEvent(room, targetPlayer, drawnCard, false);
+    broadcastRoom(room.id);
+  }
+
+  function checkTurnBlueCard(client, room, payload = {}) {
+    if (room.game.turnPlayerId !== client.playerId) {
+      sendError(client.socket, "Сейчас не ваш ход");
+      return;
+    }
+
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const turnCheck = room.game.turnCheck;
+
+    if (!actor || !turnCheck || turnCheck.playerId !== client.playerId) {
+      sendError(client.socket, "Сейчас нечего проверять");
+      return;
+    }
+
+    if (turnCheck.cardInstanceId !== payload.cardInstanceId) {
+      sendError(client.socket, "Сначала проверьте активную карту");
+      return;
+    }
+
+    const card = actor.blueCards?.find(
+      (candidate) => candidate.instanceId === payload.cardInstanceId,
+    );
+
+    if (!card) {
+      sendError(client.socket, "Карты нет на столе");
+      return;
+    }
+
+    if (card.cardId === "jail") {
+      checkJailTurnCard(room, actor, card);
+      broadcastRoom(room.id);
+      return;
+    }
+
+    if (card.cardId === "dynamite") {
+      checkDynamiteTurnCard(room, actor, card);
+      broadcastRoom(room.id);
+      return;
+    }
+
+    sendError(client.socket, "Эту карту нельзя проверить");
+  }
+
+  function checkJailTurnCard(room, actor, card) {
+    const drawnCard = drawCheckCard(room);
+
+    if (!drawnCard) return;
+
+    const isSuccess = drawnCard.suit?.id === "hearts";
+
+    room.game.discard.push(drawnCard);
+    discardBlueCard(room, actor, card.instanceId);
+    addTurnCheckEvent(room, actor, {
+      checkCard: card,
+      isSuccess,
+      consequenceText: isSuccess ? "вышел из тюрьмы" : "пропуск хода",
+      drawnCard,
+    });
+
+    if (!isSuccess) {
+      room.game.turnCheck = null;
+      completeTurn(room, actor.playerId);
+      return;
+    }
+
+    setNextTurnCheck(room, actor);
+  }
+
+  function checkDynamiteTurnCard(room, actor, card) {
+    const drawnCard = drawCheckCard(room);
+
+    if (!drawnCard) return;
+
+    const isExplosion = isDynamiteExplosionCard(drawnCard);
+
+    room.game.discard.push(drawnCard);
+    discardBlueCard(room, actor, card.instanceId, { toDiscard: isExplosion });
+
+    if (!isExplosion) {
+      passDynamiteToNextPlayer(room, actor, card);
+      addTurnCheckEvent(room, actor, {
+        checkCard: card,
+        isSuccess: true,
+        consequenceText: "передал динамит дальше",
+        drawnCard,
+      });
+      setNextTurnCheck(room, actor);
+      return;
+    }
+
+    const owner = getDynamiteOwner(room, card);
+
+    addTurnCheckEvent(room, actor, {
+      checkCard: card,
+      isSuccess: false,
+      consequenceText: "БАБААААХ",
+      drawnCard,
+      damageAmount: 3,
+      damageColor: cardConfig.bang.eventColor,
+    });
+    room.game.turnCheck = null;
+
+    if (actor.health === 3) {
+      startPendingReaction(room, {
+        sourceAction: "dynamite",
+        actorPlayerId: owner?.playerId || actor.playerId,
+        actorName: owner?.name || actor.name,
+        targetPlayerId: actor.playerId,
+        targetName: actor.name,
+        healthLoss: 3,
+        cardTitle: cardConfig.dynamite.eventTitle,
+        cardColor: cardConfig.bang.eventColor,
+      });
+      return;
+    }
+
+    applyHealthLoss(room, actor, 3, { silent: true });
+    revealDeadPlayer(room, actor, owner);
+    checkVictory(room);
+
+    if (!actor.isAlive && !room.game.winner) {
+      completeTurn(room, actor.playerId);
+      return;
+    }
+
+    setNextTurnCheck(room, actor);
   }
 
   function playReactionAction(client, room, payload = {}) {
@@ -1229,7 +1527,29 @@ export function startGameServer() {
     }
 
     completePendingReactionTarget(room, client.playerId);
+
+    if (
+      pendingReaction.sourceAction === "dynamite" &&
+      room.game.turnPlayerId === targetPlayer.playerId &&
+      targetPlayer.isAlive
+    ) {
+      setNextTurnCheck(room, targetPlayer);
+    }
+
     broadcastRoom(room.id);
+  }
+
+  function canPlayerCheckBarrel(player, pendingReaction) {
+    return Boolean(
+      player?.isAlive &&
+      isBarrelAllowedForReaction(pendingReaction) &&
+      hasBlueCardInPlay(player, "barrel") &&
+      !pendingReaction.barrelChecks?.[player.playerId],
+    );
+  }
+
+  function isBarrelAllowedForReaction(pendingReaction) {
+    return ["bang", "gatling"].includes(pendingReaction?.sourceAction);
   }
 
   function leaveGame(room, playerId) {
@@ -1396,7 +1716,7 @@ export function startGameServer() {
       status: room.status,
       hostPlayerId: room.hostPlayerId,
       playersCount: getRoomPlayersCount(room),
-      game: getPublicGame(room),
+      game: getPublicGame(room, viewerPlayerId),
       seats: room.seats.map((seat) => ({
         index: seat.index,
         player: seat.player
@@ -1406,12 +1726,13 @@ export function startGameServer() {
     };
   }
 
-  function getPublicGame(room) {
+  function getPublicGame(room, viewerPlayerId) {
     return {
       turnPlayerId: room.game.turnPlayerId,
       turnDrawTaken: room.game.turnDrawTaken,
       turnActionTaken: room.game.turnActionTaken,
       pendingReaction: room.game.pendingReaction,
+      turnCheck: room.game.turnCheck,
       winner: room.game.winner,
       winnerText: room.game.winnerText,
       winnerDetails: room.game.winnerDetails,
@@ -1443,6 +1764,10 @@ export function startGameServer() {
             includePlayState: false,
           })
         : null,
+      blueCards: (player.blueCards || []).map((card) =>
+        getPublicCard(room, player, card, { includePlayState: false }),
+      ),
+      statuses: getPlayerStatuses(player),
       bulletSkinIndex: player.bulletSkinIndex,
       bulletSkinKey: player.bulletSkinKey,
       hatSkinKey: player.hatSkinKey,
@@ -1490,6 +1815,10 @@ export function startGameServer() {
       propertyCharges: configForCard.propertyCharges,
       propertyLabel: configForCard.propertyLabel,
       weaponRange: configForCard.weaponRange,
+      statusImage: configForCard.statusImage,
+      rangeStatusBonus: configForCard.rangeStatusBonus,
+      distanceModifierFromSelf: configForCard.distanceModifierFromSelf,
+      distanceModifierToSelf: configForCard.distanceModifierToSelf,
       suit: card.suit,
       rank: card.rank,
     };
@@ -1500,7 +1829,8 @@ export function startGameServer() {
 
     return {
       ...publicCard,
-      isPlayable: isReactionPlayable || isCardPlayable(room, player, configForCard),
+      isPlayable:
+        isReactionPlayable || isCardPlayable(room, player, configForCard),
       isBlockedByTurnRule: isCardBlockedByTurnRule(room, player, configForCard),
     };
   }
@@ -1513,15 +1843,24 @@ export function startGameServer() {
     }
     if (!player.isAlive || room.game.turnPlayerId !== player.playerId)
       return false;
-    if (
-      configForCard.action === "beer" &&
-      player.health >= player.maxHealth
-    ) {
+    if (configForCard.action === "beer" && player.health >= player.maxHealth) {
       return false;
     }
     if (
       configForCard.action === "saloon" &&
       !getAlivePlayers(room).some(canHealPlayer)
+    ) {
+      return false;
+    }
+    if (
+      configForCard.action === "playBlueCard" &&
+      hasBlueCardInPlay(player, configForCard.id)
+    ) {
+      return false;
+    }
+    if (
+      configForCard.action === "playBlueCardOnTarget" &&
+      !hasEligibleBlueCardTarget(room, player, configForCard.id)
     ) {
       return false;
     }
@@ -1730,7 +2069,21 @@ export function startGameServer() {
 
     const directDistance = Math.abs(fromPosition - toPosition);
 
-    return Math.min(directDistance, aliveSeatIndexes.length - directDistance);
+    const baseDistance = Math.min(
+      directDistance,
+      aliveSeatIndexes.length - directDistance,
+    );
+    const fromPlayer = room.seats.find(
+      (seat) => seat.index === fromSeatIndex,
+    )?.player;
+    const toPlayer = room.seats.find(
+      (seat) => seat.index === toSeatIndex,
+    )?.player;
+    const distanceModifier =
+      getPlayerDistanceModifierFromSelf(fromPlayer) +
+      getPlayerDistanceModifierToSelf(toPlayer);
+
+    return Math.max(1, baseDistance + distanceModifier);
   }
 
   function createEmptySeats() {
@@ -1753,6 +2106,7 @@ export function startGameServer() {
       turnEffectAllowances: {},
       turnDrawTaken: false,
       turnActionTaken: false,
+      turnCheck: null,
       winnerDetails: null,
     };
   }
@@ -1779,6 +2133,7 @@ export function startGameServer() {
       player.attackRange = config.defaultAttackRange;
       player.hand = [];
       player.weapon = null;
+      player.blueCards = [];
 
       if (player.roleId === "sheriff") {
         player.maxHealth += 1;
@@ -1801,11 +2156,169 @@ export function startGameServer() {
     clearPendingReaction(room);
     room.game.turnPlayedEffects = {};
     room.game.turnEffectAllowances = {};
+    room.game.turnCheck = null;
     dealInitialHands(room);
     addGameEvent(
       room,
       "Раздача ролей завершена. Раздача карт согласно запасу здоровья игроков завершена.",
     );
+  }
+
+  function playBlueCard(actor, card) {
+    actor.blueCards ||= [];
+    actor.blueCards.unshift(card);
+  }
+
+  function playBlueCardOnTarget(
+    client,
+    room,
+    actor,
+    card,
+    configForCard,
+    payload = {},
+  ) {
+    const targetPlayerId = normalizePlayerId(payload.targetPlayerId);
+
+    if (!targetPlayerId || targetPlayerId === actor.playerId) {
+      sendError(client.socket, "Некорректная цель");
+      return false;
+    }
+
+    const targetSeatIndex = findSeatIndexByPlayerId(room, targetPlayerId);
+
+    if (targetSeatIndex === null) {
+      sendError(client.socket, "Игрок не найден");
+      return false;
+    }
+
+    const targetPlayer = room.seats[targetSeatIndex].player;
+
+    if (!targetPlayer.isAlive) {
+      sendError(client.socket, "Игрок уже выбыл");
+      return false;
+    }
+
+    if (card.cardId === "jail" && targetPlayer.roleId === "sheriff") {
+      sendError(client.socket, "Шерифа нельзя посадить в тюрьму");
+      return false;
+    }
+
+    if (hasBlueCardInPlay(targetPlayer, card.cardId)) {
+      sendError(client.socket, "Такая карта уже на столе");
+      return false;
+    }
+
+    if (card.cardId === "dynamite" && isDynamiteInPlay(room)) {
+      sendError(client.socket, "Динамит уже в игре");
+      return false;
+    }
+
+    targetPlayer.blueCards ||= [];
+    targetPlayer.blueCards.unshift({
+      ...card,
+      ownerPlayerId: actor.playerId,
+    });
+
+    return { targetPlayer };
+  }
+
+  function hasBlueCardInPlay(player, cardId) {
+    return Boolean(
+      (player?.blueCards || []).some((card) => card.cardId === cardId),
+    );
+  }
+
+  function discardBlueCard(room, player, cardInstanceId, options = {}) {
+    const { toDiscard = true } = options;
+    const cardIndex =
+      player?.blueCards?.findIndex(
+        (card) => card.instanceId === cardInstanceId,
+      ) ?? -1;
+
+    if (cardIndex === -1) return null;
+
+    const [card] = player.blueCards.splice(cardIndex, 1);
+
+    if (toDiscard) {
+      room.game.discard.push(card);
+    }
+
+    return card;
+  }
+
+  function isDynamiteExplosionCard(card) {
+    const rankValue = Number(card.rank?.label);
+
+    return card.suit?.id === "spades" && rankValue >= 2 && rankValue <= 9;
+  }
+
+  function passDynamiteToNextPlayer(room, fromPlayer, card) {
+    const nextPlayerId = getNextTurnPlayerId(room, fromPlayer.playerId);
+    const nextPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === nextPlayerId,
+    )?.player;
+
+    if (!nextPlayer) return;
+
+    nextPlayer.blueCards ||= [];
+    nextPlayer.blueCards.unshift(card);
+  }
+
+  function getDynamiteOwner(room, card) {
+    if (!card.ownerPlayerId) return null;
+
+    return (
+      room.seats.find((seat) => seat.player?.playerId === card.ownerPlayerId)
+        ?.player || null
+    );
+  }
+
+  function isDynamiteInPlay(room) {
+    return room.seats.some((seat) =>
+      hasBlueCardInPlay(seat.player, "dynamite"),
+    );
+  }
+
+  function hasEligibleBlueCardTarget(room, actor, cardId) {
+    if (cardId === "dynamite" && isDynamiteInPlay(room)) return false;
+
+    return getAlivePlayers(room).some((player) => {
+      if (player.playerId === actor.playerId) return false;
+      if (hasBlueCardInPlay(player, cardId)) return false;
+      if (cardId === "jail" && player.roleId === "sheriff") return false;
+
+      return true;
+    });
+  }
+
+  function getPlayerStatuses(player) {
+    return (player.blueCards || []).flatMap((card) => {
+      const configForCard = cardConfig[card.cardId];
+
+      if (!configForCard?.statusImage) return [];
+
+      return [
+        {
+          cardId: card.cardId,
+          title: configForCard.eventTitle || configForCard.title,
+          image: configForCard.statusImage,
+        },
+      ];
+    });
+  }
+
+  function getPlayerDistanceModifierFromSelf(player) {
+    return (player?.blueCards || []).reduce((modifier, card) => {
+      return (
+        modifier + (cardConfig[card.cardId]?.distanceModifierFromSelf || 0)
+      );
+    }, 0);
+  }
+
+  function getPlayerDistanceModifierToSelf(player) {
+    return (player?.blueCards || []).reduce((modifier, card) => {
+      return modifier + (cardConfig[card.cardId]?.distanceModifierToSelf || 0);
+    }, 0);
   }
 
   function dealInitialHands(room) {
@@ -1814,6 +2327,33 @@ export function startGameServer() {
         drawCards(room, seat.player.playerId, seat.player.health);
       }
     });
+  }
+
+  function setNextTurnCheck(room, player) {
+    const checkCard = getRequiredTurnCheckCard(player);
+
+    room.game.turnCheck = checkCard
+      ? {
+          playerId: player.playerId,
+          cardInstanceId: checkCard.instanceId,
+          cardId: checkCard.cardId,
+          cardTitle: getCardEventTitle(checkCard),
+        }
+      : null;
+  }
+
+  function getRequiredTurnCheckCard(player) {
+    if (!player?.isAlive) return null;
+
+    return (
+      (player.blueCards || []).find((card) => card.cardId === "dynamite") ||
+      (player.blueCards || []).find((card) => card.cardId === "jail") ||
+      null
+    );
+  }
+
+  function hasRequiredTurnCheck(room, playerId) {
+    return room.game.turnCheck?.playerId === playerId;
   }
 
   function startTurn(room, playerId) {
@@ -1828,6 +2368,8 @@ export function startGameServer() {
     const player = room.seats.find(
       (seat) => seat.player?.playerId === playerId,
     )?.player;
+
+    setNextTurnCheck(room, player);
 
     if (player) {
       addGameEvent(room, {
@@ -1860,6 +2402,12 @@ export function startGameServer() {
     player.hand = [...drawnCards, ...player.hand];
   }
 
+  function drawCheckCard(room) {
+    refillDeckIfNeeded(room);
+
+    return room.game.deck.shift() || null;
+  }
+
   function refillDeckIfNeeded(room) {
     if (room.game.deck.length >= 7 || room.game.discard.length === 0) return;
 
@@ -1876,6 +2424,56 @@ export function startGameServer() {
 
   function getCardEventColor(card) {
     return cardConfig[card.cardId]?.eventColor || "#c94a35";
+  }
+
+  function getPublicCheckCard(card) {
+    return {
+      title: getCardEventTitle(card),
+      rank: card.rank,
+      suit: card.suit,
+    };
+  }
+
+  function addBarrelCheckEvent(room, actor, drawnCard, isSuccess) {
+    const checkResult = getBarrelCheckResult(drawnCard, isSuccess);
+
+    addGameEvent(room, {
+      type: "barrelCheck",
+      actorPlayerId: actor.playerId,
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      ...checkResult,
+    });
+  }
+
+  function getBarrelCheckResult(drawnCard, isSuccess) {
+    return {
+      checkCardTitle: cardConfig.barrel.eventTitle,
+      checkCardColor: cardConfig.barrel.eventColor,
+      resultTitle: isSuccess ? "УСПЕХ" : "ПРОВАЛ",
+      consequenceText: isSuccess ? "бочка спасла" : "есть пробитие",
+      drawnCard: getPublicCheckCard(drawnCard),
+      isSuccess,
+    };
+  }
+
+  function addTurnCheckEvent(room, actor, options) {
+    const checkCard = options.checkCard;
+
+    addGameEvent(room, {
+      type: "turnCheck",
+      actorPlayerId: actor.playerId,
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      checkCardTitle: options.checkCardTitle || getCardEventTitle(checkCard),
+      checkCardColor:
+        options.checkCardColor || cardConfig[checkCard?.cardId]?.eventColor,
+      resultTitle: options.isSuccess ? "УСПЕХ" : "ПРОВАЛ",
+      consequenceText: options.consequenceText,
+      drawnCard: getPublicCheckCard(options.drawnCard),
+      damageAmount: options.damageAmount || 0,
+      damageColor: options.damageColor || cardConfig.bang.eventColor,
+    });
   }
 
   function revealDeadPlayer(room, player, killer = null) {
@@ -1910,6 +2508,15 @@ export function startGameServer() {
       clearWeaponPropertyAllowances(room, player);
       room.game.discard.push(player.weapon);
       player.weapon = null;
+    }
+
+    if (player.blueCards?.length > 0) {
+      room.game.discard.push(...player.blueCards);
+      player.blueCards = [];
+    }
+
+    if (room.game.turnCheck?.playerId === player.playerId) {
+      room.game.turnCheck = null;
     }
 
     player.attackRange = config.defaultAttackRange;

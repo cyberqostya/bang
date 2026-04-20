@@ -22,6 +22,10 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  isAttention: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 defineEmits(["select"]);
@@ -34,6 +38,7 @@ defineEmits(["select"]);
       'hand-card_selected': isSelected,
       'hand-card_disabled': isDisabled,
       'hand-card_discarding': isDiscarding,
+      'hand-card_attention': isAttention,
     }"
     type="button"
     :aria-pressed="isSelected"
@@ -78,6 +83,13 @@ defineEmits(["select"]);
 
 .hand-card_discarding {
   animation: discard-card-shake 520ms ease-in-out infinite;
+}
+
+.hand-card_attention {
+  animation: discard-card-shake 520ms ease-in-out infinite;
+  box-shadow:
+    0 0 0 2px rgba(240, 160, 32, 0.55),
+    0 10px 20px rgba(94, 84, 70, 0.2);
 }
 
 .hand-card_discarding.hand-card-leave-active {
