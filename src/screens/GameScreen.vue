@@ -32,7 +32,9 @@ const pendingReaction = computed(
   () => roomStore.room.game?.pendingReaction || null,
 );
 const isReactionTarget = computed(
-  () => pendingReaction.value?.targetPlayerId === roomStore.playerId,
+  () =>
+    pendingReaction.value?.targetPlayerId === roomStore.playerId ||
+    pendingReaction.value?.targetPlayerIds?.includes(roomStore.playerId),
 );
 const isReactionActor = computed(
   () => pendingReaction.value?.actorPlayerId === roomStore.playerId,
@@ -45,6 +47,9 @@ const reactionNoticeCardTitle = computed(
 );
 const reactionNoticeColor = computed(
   () => pendingReaction.value?.cardColor || "#c94a35",
+);
+const reactionActorPrompt = computed(
+  () => pendingReaction.value?.actorPendingPrompt || "Ожидаем реакцию жертвы на",
 );
 const reactionCountdown = computed(() => {
   if (!pendingReaction.value?.expiresAt) return 0;
@@ -266,13 +271,17 @@ watch(
 );
 
 watch(
-  () => pendingReaction.value?.id || "",
-  (reactionId, previousReactionId) => {
+  () =>
+    [
+      pendingReaction.value?.id || "",
+      ...(pendingReaction.value?.targetPlayerIds || []),
+    ].join(":"),
+  (reactionKey, previousReactionKey) => {
     window.clearInterval(reactionCountdownTimer);
     reactionCountdownTimer = null;
 
-    if (!reactionId) {
-      if (previousReactionId && wasReactionParticipant.value) {
+    if (!reactionKey) {
+      if (previousReactionKey && wasReactionParticipant.value) {
         viewMode.value = "players";
       }
       wasReactionParticipant.value = false;
@@ -280,12 +289,16 @@ watch(
     }
 
     reactionNow.value = Date.now();
+    const wasParticipant = wasReactionParticipant.value;
+
     wasReactionParticipant.value =
       isReactionTarget.value || isReactionActor.value;
 
     if (isReactionTarget.value) {
       viewMode.value = "cards";
       roomStore.cancelSelectedCard();
+    } else if (wasParticipant && !isReactionActor.value) {
+      viewMode.value = "players";
     }
 
     reactionCountdownTimer = window.setInterval(() => {
@@ -315,6 +328,16 @@ function toggleViewMode() {
   }
 
   viewMode.value = viewMode.value === "cards" ? "players" : "cards";
+}
+
+function showCardsView() {
+  if (isHeaderSwitchDisabled.value) return;
+
+  if (viewMode.value === "players" && roomStore.selectedCard) {
+    roomStore.cancelSelectedCard();
+  }
+
+  viewMode.value = "cards";
 }
 
 async function scrollEventsToBottom() {
@@ -446,7 +469,7 @@ function handleDrawPhase() {
           </p>
         </div>
       </PlayZone>
-      <GamePlayersTable />
+      <GamePlayersTable @show-cards="showCardsView" />
       <button
         v-if="roomStore.selectedCard?.selectionView === 'players'"
         class="selected-action-card"
@@ -594,7 +617,7 @@ function handleDrawPhase() {
             <span>. Время на вашу реакцию:</span>
           </template>
           <template v-else>
-            <span>Ожидаем реакцию жертвы на </span>
+            <span>{{ reactionActorPrompt }} </span>
             <span
               class="reaction-notice__card"
               :style="{ color: reactionNoticeColor }"
@@ -686,7 +709,6 @@ function handleDrawPhase() {
 .players-view {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 5px;
   min-width: 0;
   min-height: 0;
   padding: 0 0 5px;

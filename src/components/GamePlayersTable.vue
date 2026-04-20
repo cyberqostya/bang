@@ -4,6 +4,7 @@ import { healthConfig } from "../config/healthConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
+const emit = defineEmits(["showCards"]);
 
 const aliveSeatIndexes = computed(() =>
   roomStore.room.seats
@@ -14,12 +15,7 @@ const aliveSeatIndexes = computed(() =>
 
 const seats = computed(() =>
   roomStore.room.seats
-    .filter(
-      (seat) =>
-        seat.player &&
-        ((seat.player.isAlive && !seat.player.leftGame) ||
-          seat.player.playerId === roomStore.playerId),
-    )
+    .filter((seat) => seat.player && !seat.player.leftGame)
     .map((seat) => ({
       ...seat,
       isOwn: seat.player?.playerId === roomStore.playerId,
@@ -106,6 +102,17 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
     aliveSeatIndexes.value.length - directDistance,
   );
 }
+
+function handleSeatClick(seat) {
+  if (seat.isOwn) {
+    emit("showCards");
+    return;
+  }
+
+  if (seat.isTargetable) {
+    roomStore.useSelectedCard(seat.player.playerId);
+  }
+}
 </script>
 
 <template>
@@ -135,15 +142,10 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
         },
       ]"
       type="button"
-      :disabled="!seat.isTargetable"
-      @click.stop="roomStore.useSelectedCard(seat.player.playerId)"
+      :disabled="!seat.isTargetable && !seat.isOwn"
+      @click.stop="handleSeatClick(seat)"
     >
-      <span
-        v-if="seat.player.isAlive || seat.isOwn"
-        class="game-seat__statuses"
-        aria-hidden="true"
-      >
-        <span v-if="seat.isOwn" class="game-seat__own-marker">Я</span>
+      <span class="game-seat__statuses" aria-hidden="true">
         <span v-if="seat.player.health > 0" class="game-seat__health">
           <img
             v-for="point in seat.player.health"
@@ -185,6 +187,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .game-players-table__oval {
@@ -267,24 +270,6 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   gap: 1px;
 }
 
-.game-seat__own-marker {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 18px;
-  border-radius: 5px;
-  background: var(--gold);
-  filter: drop-shadow(0 2px 3px rgba(29, 29, 29, 0.22));
-  color: var(--ink);
-  font-size: 16px;
-  line-height: 1;
-  transform: translate(-50%, -50%) rotate(-7deg);
-}
-
 .game-seat__statuses {
   --status-radius: 59px;
   --status-diagonal: calc(var(--status-radius) * 0.707);
@@ -298,6 +283,12 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
+}
+
+.game-seat_own .game-seat__statuses {
+  border-color: rgba(240, 160, 32, 0.92);
+  border-width: 2px;
+  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.12);
 }
 
 .game-seat__health {
@@ -410,6 +401,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   margin-bottom: -4px;
   pointer-events: none;
   position: relative;
+  z-index: 1;
 }
 
 .game-seat__hat_13 {
@@ -453,24 +445,9 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   transform: translate(-50%, -50%) translate(0, var(--status-radius));
 }
 
-.game-seat_1 .game-seat__own-marker {
-  transform: translate(-50%, -50%) translate(0, var(--status-radius))
-    rotate(-7deg);
-}
-
 .game-seat_1 .game-seat__range {
   transform: translate(-50%, -50%)
     translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
-}
-
-.game-seat_1.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%)
-    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
-}
-
-.game-seat_1.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%)
-    translate(var(--status-diagonal), var(--status-diagonal));
 }
 
 .game-seat_2 {
@@ -487,22 +464,8 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
     translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
 }
 
-.game-seat_2 .game-seat__own-marker {
-  transform: translate(-50%, -50%)
-    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal))
-    rotate(-7deg);
-}
-
 .game-seat_2 .game-seat__range {
   transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
-}
-
-.game-seat_2.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
-}
-
-.game-seat_2.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%) translate(0, var(--status-radius));
 }
 
 .game-seat_3 {
@@ -519,30 +482,12 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
 }
 
-.game-seat_3 .game-seat__own-marker {
-  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0)
-    rotate(-7deg);
-}
-
 .game-seat_3 .game-seat__range {
   transform: translate(-50%, -50%)
     translate(
       calc(var(--status-diagonal) * -1),
       calc(var(--status-diagonal) * -1)
     );
-}
-
-.game-seat_3.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%)
-    translate(
-      calc(var(--status-diagonal) * -1),
-      calc(var(--status-diagonal) * -1)
-    );
-}
-
-.game-seat_3.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%)
-    translate(calc(var(--status-diagonal) * -1), var(--status-diagonal));
 }
 
 .game-seat_4 {
@@ -562,25 +507,8 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
     );
 }
 
-.game-seat_4 .game-seat__own-marker {
-  transform: translate(-50%, -50%)
-    translate(
-      calc(var(--status-diagonal) * -1),
-      calc(var(--status-diagonal) * -1)
-    )
-    rotate(-7deg);
-}
-
 .game-seat_4 .game-seat__range {
   transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
-}
-
-.game-seat_4.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
-}
-
-.game-seat_4.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%) translate(calc(var(--status-radius) * -1), 0);
 }
 
 .game-seat_5 {
@@ -597,27 +525,9 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
 }
 
-.game-seat_5 .game-seat__own-marker {
-  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1))
-    rotate(-7deg);
-}
-
 .game-seat_5 .game-seat__range {
   transform: translate(-50%, -50%)
     translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
-}
-
-.game-seat_5.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%)
-    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
-}
-
-.game-seat_5.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%)
-    translate(
-      calc(var(--status-diagonal) * -1),
-      calc(var(--status-diagonal) * -1)
-    );
 }
 
 .game-seat_6 {
@@ -634,22 +544,8 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
     translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
 }
 
-.game-seat_6 .game-seat__own-marker {
-  transform: translate(-50%, -50%)
-    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1))
-    rotate(-7deg);
-}
-
 .game-seat_6 .game-seat__range {
   transform: translate(-50%, -50%) translate(var(--status-radius), 0);
-}
-
-.game-seat_6.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%) translate(var(--status-radius), 0);
-}
-
-.game-seat_6.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%) translate(0, calc(var(--status-radius) * -1));
 }
 
 .game-seat_7 {
@@ -666,24 +562,9 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   transform: translate(-50%, -50%) translate(var(--status-radius), 0);
 }
 
-.game-seat_7 .game-seat__own-marker {
-  transform: translate(-50%, -50%) translate(var(--status-radius), 0)
-    rotate(-7deg);
-}
-
 .game-seat_7 .game-seat__range {
   transform: translate(-50%, -50%)
     translate(var(--status-diagonal), var(--status-diagonal));
-}
-
-.game-seat_7.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%)
-    translate(var(--status-diagonal), var(--status-diagonal));
-}
-
-.game-seat_7.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%)
-    translate(var(--status-diagonal), calc(var(--status-diagonal) * -1));
 }
 
 .game-seat_8 {
@@ -700,21 +581,8 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
     translate(var(--status-diagonal), var(--status-diagonal));
 }
 
-.game-seat_8 .game-seat__own-marker {
-  transform: translate(-50%, -50%)
-    translate(var(--status-diagonal), var(--status-diagonal)) rotate(-7deg);
-}
-
 .game-seat_8 .game-seat__range {
   transform: translate(-50%, -50%) translate(0, var(--status-radius));
-}
-
-.game-seat_8.game-seat_own .game-seat__health {
-  transform: translate(-50%, -50%) translate(0, var(--status-radius));
-}
-
-.game-seat_8.game-seat_own .game-seat__range {
-  transform: translate(-50%, -50%) translate(var(--status-radius), 0);
 }
 
 .game-seat_5 .game-seat__hat,

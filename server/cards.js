@@ -7,6 +7,7 @@ export const cardConfig = {
     playMode: "instant",
     eventColor: "#c94a35",
     action: "bang",
+    reactionTo: ["indians"],
     targetPrompt: "Вы стали целью БЭНГ",
     actorPendingPrompt: "Ожидание реакции жертвы",
     selectionView: "players",
@@ -14,6 +15,32 @@ export const cardConfig = {
     usesWeaponRange: true,
     disposable: true,
     effectLimitKey: "bang",
+  },
+  gatling: {
+    id: "gatling",
+    title: "Gatling",
+    eventTitle: "Гатлинг",
+    image: "/images/cards/gatling.webp",
+    playMode: "instant",
+    eventColor: "#c94a35",
+    action: "gatling",
+    targetPrompt: "Вы стали целью Гатлинг",
+    actorPendingPrompt: "Ожидаем реакцию жертв на",
+    needsTarget: false,
+    disposable: true,
+  },
+  indians: {
+    id: "indians",
+    title: "Indians",
+    eventTitle: "Индейцы",
+    image: "/images/cards/indians.webp",
+    playMode: "instant",
+    eventColor: "#c94a35",
+    action: "indians",
+    targetPrompt: "Вы стали целью Индейцы",
+    actorPendingPrompt: "Ожидаем реакцию жертв на",
+    needsTarget: false,
+    disposable: true,
   },
   missed: {
     id: "missed",
@@ -23,9 +50,59 @@ export const cardConfig = {
     playMode: "reaction",
     eventColor: "#42AAFF",
     action: "missed",
-    reactionTo: ["bang"],
+    reactionTo: ["bang", "gatling"],
     needsTarget: false,
     disposable: true,
+  },
+  beer: {
+    id: "beer",
+    title: "Beer",
+    eventTitle: "ПИВО",
+    image: "/images/cards/beer.webp",
+    playMode: "instant",
+    eventColor: "#FFBF00",
+    action: "beer",
+    reactionTo: ["bang", "gatling", "indians"],
+    reactionOnLethalHealthLoss: true,
+    needsTarget: false,
+    disposable: true,
+    healAmount: 1,
+  },
+  saloon: {
+    id: "saloon",
+    title: "Saloon",
+    eventTitle: "Салун",
+    image: "/images/cards/saloon.webp",
+    playMode: "instant",
+    eventColor: "#FFBF00",
+    action: "saloon",
+    needsTarget: false,
+    disposable: true,
+    healAmount: 1,
+  },
+  stagecoach: {
+    id: "stagecoach",
+    title: "Stagecoach",
+    eventTitle: "Дилижанс",
+    image: "/images/cards/stagecoach.webp",
+    playMode: "instant",
+    eventColor: "#50c878",
+    action: "drawCards",
+    needsTarget: false,
+    disposable: true,
+    drawCount: 2,
+  },
+  wellsfargo: {
+    id: "wellsfargo",
+    title: "Wells Fargo",
+    eventTitle: "Уэллс Фарго",
+    image: "/images/cards/wellsfargo.webp",
+    playMode: "instant",
+    eventColor: "#50c878",
+    action: "drawCards",
+    needsTarget: false,
+    disposable: true,
+    drawCount: 3,
   },
   remington: {
     id: "remington",
@@ -190,6 +267,13 @@ const missedCards = [
   "Ac",
 ];
 
+const beerCards = ["8h", "Jh", "6h", "10h", "9h", "7h"];
+const gatlingCards = ["10h"];
+const indiansCards = ["Ad", "Kd"];
+const saloonCards = ["5h"];
+const stagecoachCards = ["9s", "9s"];
+const wellsFargoCards = ["3h"];
+
 const weaponCards = [
   ["remington", "Kc"],
   ["carbine", "Ac"],
@@ -208,6 +292,24 @@ export function createDeck() {
     ),
     ...missedCards.map((cardCode, index) =>
       createDeckCard("missed", cardCode, index),
+    ),
+    ...beerCards.map((cardCode, index) =>
+      createDeckCard("beer", cardCode, index),
+    ),
+    ...gatlingCards.map((cardCode, index) =>
+      createDeckCard("gatling", cardCode, index),
+    ),
+    ...indiansCards.map((cardCode, index) =>
+      createDeckCard("indians", cardCode, index),
+    ),
+    ...saloonCards.map((cardCode, index) =>
+      createDeckCard("saloon", cardCode, index),
+    ),
+    ...stagecoachCards.map((cardCode, index) =>
+      createDeckCard("stagecoach", cardCode, index),
+    ),
+    ...wellsFargoCards.map((cardCode, index) =>
+      createDeckCard("wellsfargo", cardCode, index),
     ),
     ...weaponCards.map(([cardId, cardCode], index) =>
       createDeckCard(cardId, cardCode, index),

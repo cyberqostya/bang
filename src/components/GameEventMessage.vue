@@ -86,6 +86,70 @@ function getPlayerLabel(roleId, name) {
       </span>
     </template>
 
+    <template v-else-if="event.type === 'cardOnly'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span
+        class="game-event-message__card"
+        :style="{ color: event.cardColor }"
+      >
+        {{ event.cardTitle }}
+      </span>
+    </template>
+
+    <template v-else-if="event.type === 'cardDraw'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span
+        class="game-event-message__card"
+        :style="{ color: event.cardColor }"
+      >
+        {{ event.cardTitle }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span>взял {{ event.cardsCount }} карты</span>
+    </template>
+
+    <template v-else-if="event.type === 'heal'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span
+        class="game-event-message__card"
+        :style="{ color: event.cardColor }"
+      >
+        {{ event.cardTitle }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span
+        class="game-event-message__heal"
+        :style="{ color: event.cardColor }"
+      >
+        +{{ event.amount }}HP
+      </span>
+    </template>
+
+    <template v-else-if="event.type === 'groupHeal'">
+      <template v-for="(player, index) in event.players" :key="player.playerId">
+        <span v-if="index > 0">, </span>
+        <span class="game-event-message__player">
+          {{ getPlayerLabel(player.roleId, player.name) }}
+        </span>
+      </template>
+      <span class="game-event-message__separator"> -- </span>
+      <span
+        class="game-event-message__heal"
+        :style="{ color: event.cardColor }"
+      >
+        +{{ event.amount }}HP
+      </span>
+    </template>
+
     <template v-else-if="event.type === 'death'">
       <span class="game-event-message__player">
         {{ getPlayerLabel(event.playerRoleId, event.playerName) }}
@@ -144,6 +208,10 @@ function getPlayerLabel(roleId, name) {
 
 .game-event-message__damage {
   color: var(--red);
+  font-weight: 700;
+}
+
+.game-event-message__heal {
   font-weight: 700;
 }
 
