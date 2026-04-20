@@ -35,9 +35,9 @@ defineEmits(["close"]);
 }
 
 .card-preview__card {
-  --card-width: min(72vw, 260px);
+  --card-width: var(--card-preview-width);
 
-  width: min(72vw, 260px);
+  width: var(--card-preview-width);
   border-radius: 6px;
   background: transparent;
   animation: card-preview-in 220ms ease forwards;

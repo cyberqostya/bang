@@ -954,7 +954,10 @@ export function startGameServer() {
   function playReactionAction(client, room, payload = {}) {
     const pendingReaction = room.game.pendingReaction;
 
-    if (!pendingReaction || pendingReaction.targetPlayerId !== client.playerId) {
+    if (
+      !pendingReaction ||
+      pendingReaction.targetPlayerId !== client.playerId
+    ) {
       sendError(client.socket, "Сейчас нельзя сыграть реакцию");
       return;
     }
@@ -1313,9 +1316,9 @@ export function startGameServer() {
 
     return Boolean(
       pendingReaction &&
-        player.isAlive &&
-        pendingReaction.targetPlayerId === player.playerId &&
-        configForCard.reactionTo?.includes(pendingReaction.sourceAction),
+      player.isAlive &&
+      pendingReaction.targetPlayerId === player.playerId &&
+      configForCard.reactionTo?.includes(pendingReaction.sourceAction),
     );
   }
 
@@ -1534,7 +1537,7 @@ export function startGameServer() {
     dealInitialHands(room);
     addGameEvent(
       room,
-      "Игроки получили свои роли случайным образом. Каждому игроку раздали случайные карты согласно их запасу здоровья. Шериф ходит первым.",
+      "Раздача ролей завершена. Раздача карт согласно запасу здоровья игроков завершена.",
     );
   }
 

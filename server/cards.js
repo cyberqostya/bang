@@ -21,7 +21,7 @@ export const cardConfig = {
     eventTitle: "МИМО",
     image: "/images/cards/missed.webp",
     playMode: "reaction",
-    eventColor: "#c94a35",
+    eventColor: "#42AAFF",
     action: "missed",
     reactionTo: ["bang"],
     needsTarget: false,

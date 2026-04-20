@@ -38,7 +38,9 @@
   --red: #c94a35;
   --ratio: 1.618;
   --card-width: 72px;
-  --bullet-height: calc(var(--card-width) * var(--ratio));
+  --card-preview-width: min(68vw, 220px);
+  --card-height: calc(var(--card-width) * var(--ratio));
+  --bullet-height: calc(var(--card-height) * 0.75);
 }
 
 * {

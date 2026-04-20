@@ -110,7 +110,7 @@ async function updateBulletMetrics() {
       }"
       :aria-label="bullet.isLoaded ? 'Патрон заряжен' : 'Патрон потерян'"
     >
-      <img :src="bulletImage" alt="" />
+      <img :src="bulletImage" alt="" @load="updateBulletMetrics" />
     </div>
   </div>
 </template>
@@ -119,16 +119,13 @@ async function updateBulletMetrics() {
 .bullets {
   position: relative;
   display: flex;
-  flex: 1 1 auto;
   min-width: 0;
   overflow: visible;
 }
 
 .bullet {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: calc(var(--card-width) * 0.75);
+  width: max-content;
+  height: var(--bullet-height);
   background: transparent;
 }
 
@@ -138,7 +135,6 @@ async function updateBulletMetrics() {
 
 .bullet img {
   width: auto;
-  max-width: 100%;
   height: 100%;
   object-fit: contain;
   transition:

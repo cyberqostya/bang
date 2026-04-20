@@ -3,7 +3,7 @@
   seatCount: 8,
   defaultHealth: 4,
   defaultAttackRange: 1,
-  bulletSkinCount: 10,
+  bulletSkinCount: 11,
   hatSkinCount: 13,
   maxRoomNameLength: 15,
   maxPlayerNameLength: 12,

@@ -28,7 +28,9 @@ const finishDelayLeft = ref(0);
 let reactionCountdownTimer = null;
 const REACTION_WINDOW_MS = 5 * 1000;
 const gameEvents = computed(() => roomStore.room.game?.events || []);
-const pendingReaction = computed(() => roomStore.room.game?.pendingReaction || null);
+const pendingReaction = computed(
+  () => roomStore.room.game?.pendingReaction || null,
+);
 const isReactionTarget = computed(
   () => pendingReaction.value?.targetPlayerId === roomStore.playerId,
 );
@@ -95,6 +97,9 @@ const isPlayPhaseDisabled = computed(
     roomStore.isDiscardingCards ||
     activePhaseIndex.value > 0 ||
     Boolean(roomStore.room.game?.turnActionTaken),
+);
+const isHeaderSwitchDisabled = computed(
+  () => viewMode.value === "cards" && roomStore.isDiscardingCards,
 );
 const shouldShowDeathNotice = computed(
   () =>
@@ -275,7 +280,8 @@ watch(
     }
 
     reactionNow.value = Date.now();
-    wasReactionParticipant.value = isReactionTarget.value || isReactionActor.value;
+    wasReactionParticipant.value =
+      isReactionTarget.value || isReactionActor.value;
 
     if (isReactionTarget.value) {
       viewMode.value = "cards";
@@ -302,6 +308,12 @@ onBeforeUnmount(() => {
 });
 
 function toggleViewMode() {
+  if (isHeaderSwitchDisabled.value) return;
+
+  if (viewMode.value === "players" && roomStore.selectedCard) {
+    roomStore.cancelSelectedCard();
+  }
+
   viewMode.value = viewMode.value === "cards" ? "players" : "cards";
 }
 
@@ -404,6 +416,7 @@ function handleDrawPhase() {
         <button
           class="header-switch"
           type="button"
+          :disabled="isHeaderSwitchDisabled"
           @click.stop="toggleViewMode"
         >
           {{ viewMode === "cards" ? "К игрокам" : "К картам" }}
@@ -640,6 +653,11 @@ function handleDrawPhase() {
   color: var(--muted);
   font-size: 20px;
   font-weight: 600;
+}
+
+.header-switch:disabled {
+  cursor: default;
+  opacity: 0.42;
 }
 
 .leave-game-button {
@@ -975,8 +993,7 @@ function handleDrawPhase() {
 }
 
 .reaction-notice-enter-active {
-  animation: reaction-notice-drop 260ms cubic-bezier(0.2, 0.85, 0.26, 1.1)
-    both;
+  animation: reaction-notice-drop 260ms cubic-bezier(0.2, 0.85, 0.26, 1.1) both;
 }
 
 .reaction-notice-leave-active {

@@ -39,6 +39,21 @@ const turnPlayer = computed(
       (seat) => seat.player.playerId === roomStore.room.game?.turnPlayerId,
     )?.player || null,
 );
+const turnSeatIndex = computed(
+  () =>
+    seats.value.find(
+      (seat) => seat.player.playerId === roomStore.room.game?.turnPlayerId,
+    )?.index ?? null,
+);
+const turnLightStyle = computed(() => {
+  if (turnSeatIndex.value === null) return {};
+
+  const turnAngles = [0, 45, 90, 135, 180, -135, -90, -45];
+
+  return {
+    "--turn-light-angle": `${turnAngles[turnSeatIndex.value] ?? 0}deg`,
+  };
+});
 const turnPlayerLabel = computed(() => {
   if (!turnPlayer.value) return "игровой стол";
 
@@ -56,10 +71,7 @@ function getBulletImage(player) {
     return healthConfig.sheriffBulletImage;
   }
 
-  return (
-    healthConfig.bulletImages[player.bulletSkinIndex] ||
-    healthConfig.bulletImages[0]
-  );
+  return healthConfig.tableBulletImage;
 }
 
 function isSheriff(player) {
@@ -98,8 +110,14 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
 
 <template>
   <section class="game-players-table" aria-label="Игроки за столом">
+    <span
+      v-if="turnSeatIndex !== null"
+      class="game-players-table__turn-light"
+      :style="turnLightStyle"
+      aria-hidden="true"
+    ></span>
     <div class="game-players-table__oval">
-      <span>{{ turnPlayerLabel }}</span>
+      <span class="game-players-table__label">{{ turnPlayerLabel }}</span>
     </div>
 
     <button
@@ -174,6 +192,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   inset: 7% 10%;
   display: grid;
   place-items: center;
+  overflow: hidden;
   border: 2px solid rgba(94, 84, 70, 0.3);
   border-radius: 50%;
   background: linear-gradient(
@@ -186,11 +205,30 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
     0 12px 24px rgba(94, 84, 70, 0.12);
 }
 
-.game-players-table__oval span {
+.game-players-table__turn-light {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: conic-gradient(
+    from calc(var(--turn-light-angle) - 36deg) at 50% 50%,
+    transparent 0deg,
+    rgba(240, 160, 32, 0.06) 10deg,
+    rgba(240, 160, 32, 0.32) 23deg,
+    rgba(240, 160, 32, 0.26) 45deg,
+    rgba(240, 160, 32, 0.06) 62deg,
+    transparent 76deg 360deg
+  );
+}
+
+.game-players-table__label {
+  position: relative;
+  z-index: 1;
   color: rgba(94, 84, 70, 0.34);
   font-size: 18px;
   line-height: 1;
   text-align: center;
+  width: 50%;
 }
 
 .game-seat {
@@ -199,6 +237,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   justify-items: center;
   gap: 1px;
   width: 80px;
+  z-index: 2;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -228,10 +267,6 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   gap: 1px;
 }
 
-.game-seat_turn .game-seat__player {
-  animation: turn-player-float 1500ms ease-in-out infinite;
-}
-
 .game-seat__own-marker {
   position: absolute;
   left: 50%;
@@ -251,14 +286,16 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
 }
 
 .game-seat__statuses {
-  --status-radius: 50px;
+  --status-radius: 59px;
   --status-diagonal: calc(var(--status-radius) * 0.707);
   position: absolute;
   left: 50%;
   top: 42%;
   z-index: 1;
-  width: calc(var(--status-radius) * 2 + 18px);
-  height: calc(var(--status-radius) * 2 + 18px);
+  width: calc(var(--status-radius) * 2);
+  height: calc(var(--status-radius) * 2);
+  border: 1px dashed rgba(94, 84, 70, 0.34);
+  border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
 }
@@ -274,13 +311,13 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
 }
 
 .game-seat__health img {
-  width: 14px;
-  height: auto;
+  width: auto;
+  height: 20px;
   object-fit: contain;
 }
 
 .game-seat__health img + img {
-  margin-left: -9px;
+  margin-left: -4px;
 }
 
 .game-seat__range {
@@ -334,7 +371,7 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
 .game-seat__reticle {
   position: absolute;
   left: 50%;
-  top: 30px;
+  top: 42%;
   z-index: 3;
   width: 54px;
   height: 54px;
@@ -709,17 +746,6 @@ function getDistanceFromOwnSeat(targetSeatIndex) {
   100% {
     opacity: 0;
     transform: translate(-50%, -50%) scale(1.2);
-  }
-}
-
-@keyframes turn-player-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-13px);
   }
 }
 </style>

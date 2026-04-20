@@ -73,7 +73,7 @@ function closeRole() {
 }
 
 .role-card-preview {
-  width: min(72vw, 260px);
+  width: var(--card-preview-width);
   border-radius: 6px;
   background: transparent;
   perspective: 900px;
