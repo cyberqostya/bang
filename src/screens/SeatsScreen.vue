@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { nextTick, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import AppButton from "../components/AppButton.vue";
 import AppScreen from "../components/AppScreen.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
@@ -68,35 +69,38 @@ function confirmCloseRoom() {
   <AppScreen class="seats-screen">
     <AppHeader>
       <template #left>
-        <button
+        <AppButton
           v-if="roomStore.isHost"
-          class="header-button header-button_muted"
+          variant="muted"
+          size="header"
           type="button"
           :disabled="roomStore.isSeated"
           @click="openCloseRoomDialog"
         >
           Закрыть комнату
-        </button>
-        <button
+        </AppButton>
+        <AppButton
           v-else
-          class="header-button header-button_muted"
+          variant="muted"
+          size="header"
           type="button"
           :disabled="roomStore.isSeated"
           @click="roomStore.leaveRoom"
         >
           Выйти
-        </button>
+        </AppButton>
       </template>
       <template #right>
-        <button
+        <AppButton
           v-if="roomStore.isHost"
-          class="header-button"
+          variant="primary"
+          size="header"
           type="button"
           :disabled="!roomStore.canStartGame"
           @click="roomStore.startGame"
         >
           Начать игру
-        </button>
+        </AppButton>
       </template>
     </AppHeader>
 
@@ -155,20 +159,22 @@ function confirmCloseRoom() {
           placeholder="Имя"
         />
         <div class="name-dialog__actions">
-          <button
-            class="name-dialog__cancel"
+          <AppButton
+            variant="muted"
+            size="modal"
             type="button"
             @click="closeNameDialog"
           >
             <span>Отмена</span>
-          </button>
-          <button
-            class="name-dialog__submit"
+          </AppButton>
+          <AppButton
+            variant="primary"
+            size="modal"
             type="submit"
             :disabled="!playerName.trim()"
           >
             <span>Сесть</span>
-          </button>
+          </AppButton>
         </div>
       </form>
     </div>
@@ -183,16 +189,17 @@ function confirmCloseRoom() {
       <form class="close-room-dialog__form" @submit.prevent="confirmCloseRoom">
         <p>Вы действительно хотите закрыть комнату?</p>
         <div class="close-room-dialog__actions">
-          <button
-            class="close-room-dialog__cancel"
+          <AppButton
+            variant="muted"
+            size="modal"
             type="button"
             @click="closeCloseRoomDialog"
           >
             <span>Нет</span>
-          </button>
-          <button class="close-room-dialog__submit" type="submit">
+          </AppButton>
+          <AppButton variant="primary" size="modal" type="submit">
             <span>Да</span>
-          </button>
+          </AppButton>
         </div>
       </form>
     </div>
@@ -202,26 +209,6 @@ function confirmCloseRoom() {
 <style scoped>
 .seats-screen {
   gap: 10px;
-}
-
-.header-button {
-  height: 100%;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 10px;
-  background: var(--gold);
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.header-button_muted {
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--muted);
-}
-
-.header-button:disabled {
-  opacity: 0.52;
 }
 
 .seat-table {
@@ -257,20 +244,41 @@ function confirmCloseRoom() {
 
 .seat {
   position: absolute;
-  --plus-color: rgb(202, 189, 169);
+  --plus-color: rgba(94, 84, 70, 0.52);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  height: 72px;
+  width: 60px;
+  height: 60px;
   border: 1px dashed var(--muted);
   border-radius: 50%;
-  background: var(--back-soft);
+  background:
+    radial-gradient(
+      circle at 35% 28%,
+      rgba(243, 241, 219, 1),
+      rgba(235, 229, 208, 0.82) 68%
+    ),
+    repeating-linear-gradient(
+      135deg,
+      rgba(94, 84, 70, 0.08) 0,
+      rgba(94, 84, 70, 0.08) 6px,
+      transparent 6px,
+      transparent 12px
+    );
   color: var(--ink);
   font-size: 24px;
   line-height: 1;
   padding: 0;
   text-align: center;
+}
+
+.seat:not(.seat_taken) {
+  border-color: rgba(94, 84, 70, 0.36);
+
+  box-shadow:
+    inset 0 0 0 2px rgba(243, 241, 219, 0.58),
+    inset 0 -9px 16px rgba(94, 84, 70, 0.08),
+    0 8px 18px rgba(94, 84, 70, 0.1);
 }
 
 .seat::before,
@@ -281,7 +289,7 @@ function confirmCloseRoom() {
   top: 50%;
   display: none;
   width: 20px;
-  height: 2px;
+  height: 3px;
   border-radius: 999px;
   background: var(--plus-color);
   transform: translate(-50%, -50%);
@@ -311,13 +319,12 @@ function confirmCloseRoom() {
   border-radius: 6px;
   height: auto;
   width: auto;
-  min-height: 1.2em;
   display: flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
   text-align: center;
-  padding-inline: 5px;
+  padding: 4px 10px 6px;
   border: none;
   outline: 2px solid rgba(94, 84, 70, 0.3);
 }
@@ -326,10 +333,11 @@ function confirmCloseRoom() {
   width: 100%;
   height: 100%;
   color: var(--ink);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 500;
   line-height: 1;
   text-align: center;
+  font-style: italic;
 }
 
 .seat__remove {
@@ -467,31 +475,5 @@ function confirmCloseRoom() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-.name-dialog__actions button,
-.close-room-dialog__actions button {
-  min-height: 44px;
-  border: none;
-  border-radius: 6px;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.name-dialog__cancel,
-.close-room-dialog__cancel {
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--muted);
-}
-
-.name-dialog__submit,
-.close-room-dialog__submit {
-  background: var(--gold);
-  color: var(--ink);
-}
-
-.name-dialog__actions button:disabled,
-.close-room-dialog__actions button:disabled {
-  opacity: 0.5;
 }
 </style>

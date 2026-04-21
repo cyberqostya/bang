@@ -1,4 +1,6 @@
 <script setup>
+import GameEventCardTitle from "./GameEventCardTitle.vue";
+
 const props = defineProps({
   event: {
     type: Object,
@@ -9,17 +11,10 @@ const props = defineProps({
     default: "default",
   },
 });
-
-const emit = defineEmits(["preview-card"]);
+const emit = defineEmits(["open-card"]);
 
 function getPlayerLabel(roleId, name) {
   return roleId === "sheriff" ? `Шериф ${name}` : name;
-}
-
-function previewEventCard(card) {
-  if (!card) return;
-
-  emit("preview-card", card);
 }
 
 function getCheckCardTitle(event) {
@@ -43,6 +38,10 @@ function getColorStyle(color) {
 function getDrawnCardStyle(event) {
   return { color: event.drawnCard?.suit?.color };
 }
+
+function openCard(cardId) {
+  emit("open-card", cardId);
+}
 </script>
 
 <template>
@@ -55,22 +54,14 @@ function getDrawnCardStyle(event) {
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span class="game-event-message__separator"> -- </span>
-      <button
-        v-if="event.previewCard"
-        class="game-event-message__card game-event-message__card_preview"
-        type="button"
-        :style="getColorStyle(event.cardColor)"
-        @click.stop="previewEventCard(event.previewCard)"
-      >
-        {{ event.cardTitle }}
-      </button>
-      <span
-        v-else
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
       <span class="game-event-message__separator"> -- </span>
       <span class="game-event-message__player">
         {{ getPlayerLabel(event.targetRoleId, event.targetName) }}
@@ -84,22 +75,7 @@ function getDrawnCardStyle(event) {
       <span class="game-event-message__separator"> -- </span>
       <span>сброс</span>
       <span class="game-event-message__separator"> -- </span>
-      <button
-        v-if="event.previewCard"
-        class="game-event-message__card game-event-message__card_preview"
-        type="button"
-        :style="getColorStyle(event.cardColor)"
-        @click.stop="previewEventCard(event.previewCard)"
-      >
-        {{ event.cardTitle }}
-      </button>
-      <span
-        v-else
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <span>{{ event.cardTitle }}</span>
     </template>
 
     <template v-else-if="event.type === 'equip'">
@@ -109,12 +85,14 @@ function getDrawnCardStyle(event) {
       <span class="game-event-message__separator"> -- </span>
       <span>оружие</span>
       <span class="game-event-message__separator"> -- </span>
-      <span
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
     </template>
 
     <template v-else-if="event.type === 'propertyUse'">
@@ -122,12 +100,14 @@ function getDrawnCardStyle(event) {
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span> активировал свойство </span>
-      <span
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
     </template>
 
     <template v-else-if="event.type === 'reaction'">
@@ -135,12 +115,14 @@ function getDrawnCardStyle(event) {
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span class="game-event-message__separator"> -- </span>
-      <span
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
     </template>
 
     <template
@@ -151,12 +133,14 @@ function getDrawnCardStyle(event) {
       </span>
       <span class="game-event-message__separator"> -- </span>
       <span>проверка </span>
-      <span
-        class="game-event-message__check-source"
-        :style="getColorStyle(getCheckCardColor(event))"
-      >
-        {{ getCheckCardTitle(event) }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.checkCardId"
+        :title="getCheckCardTitle(event)"
+        :color="getCheckCardColor(event)"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
       <span class="game-event-message__separator"> -- </span>
       <span>{{ getCheckResultTitle(event) }}</span>
       <span class="game-event-message__separator"> -- </span>
@@ -167,7 +151,7 @@ function getDrawnCardStyle(event) {
       >
         <span>{{ event.drawnCard?.title }}</span>
         <span>-</span>
-        <span class="game-event-message__check-rank">
+        <span>
           {{ event.drawnCard?.rank?.label }}
         </span>
         <img
@@ -196,22 +180,14 @@ function getDrawnCardStyle(event) {
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span class="game-event-message__separator"> -- </span>
-      <button
-        v-if="event.previewCard"
-        class="game-event-message__card game-event-message__card_preview"
-        type="button"
-        :style="getColorStyle(event.cardColor)"
-        @click.stop="previewEventCard(event.previewCard)"
-      >
-        {{ event.cardTitle }}
-      </button>
-      <span
-        v-else
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
     </template>
 
     <template v-else-if="event.type === 'cardDraw'">
@@ -219,12 +195,14 @@ function getDrawnCardStyle(event) {
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span class="game-event-message__separator"> -- </span>
-      <span
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
       <span class="game-event-message__separator"> -- </span>
       <span>взял {{ event.cardsCount }} карты</span>
     </template>
@@ -234,12 +212,14 @@ function getDrawnCardStyle(event) {
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span class="game-event-message__separator"> -- </span>
-      <span
-        class="game-event-message__card"
-        :style="getColorStyle(event.cardColor)"
-      >
-        {{ event.cardTitle }}
-      </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
       <span class="game-event-message__separator"> -- </span>
       <span
         class="game-event-message__heal"
@@ -323,21 +303,8 @@ function getDrawnCardStyle(event) {
   font-weight: 600;
 }
 
-.game-event-message__card_preview {
-  border: 0;
-  border-radius: 0;
-  padding: 0;
-  background: transparent;
-  font: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: zoom-in;
-  display: inline-grid;
-}
-
 .game-event-message__role {
-  text-decoration: underline;
+  color: #7500f1;
 }
 
 .game-event-message__damage {
@@ -357,11 +324,6 @@ function getDrawnCardStyle(event) {
   display: inline-flex;
   align-items: center;
   vertical-align: baseline;
-  font-weight: 600;
-}
-
-.game-event-message__check-rank {
-  font-weight: 700;
 }
 
 .game-event-message__check-suit {

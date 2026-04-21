@@ -1,6 +1,8 @@
 ﻿<script setup>
 import { nextTick, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import AppButton from "../components/AppButton.vue";
+import AppInput from "../components/AppInput.vue";
 import AppScreen from "../components/AppScreen.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
@@ -114,19 +116,19 @@ function getRoomStatusText(room) {
   <AppScreen class="rooms-screen">
     <AppHeader>
       <template #left>
-        <button
-          class="create-room-button"
+        <AppButton
+          variant="primary"
+          size="header"
           type="button"
           :disabled="!roomStore.isConnected"
           @click="openCreateDialog"
         >
-          <span>Создать комнату</span>
-        </button>
+          <span>Создать</span>
+        </AppButton>
       </template>
     </AppHeader>
 
     <section class="rooms-zone" aria-label="Список комнат">
-      <span class="rooms-zone__title">Список комнат</span>
       <div class="rooms-zone__content">
         <button
           v-for="room in roomStore.rooms"
@@ -146,12 +148,16 @@ function getRoomStatusText(room) {
 
         <button
           v-if="roomStore.rooms.length === 0"
-          class="room-create-card"
+          class="room-card room-create-card"
           type="button"
           :disabled="!roomStore.isConnected"
           aria-label="Создать комнату"
           @click="openCreateDialog"
         >
+          <span class="room-card__text room-create-card__text">
+            <span>Новая комната</span>
+            <small>Создать место для игры</small>
+          </span>
           <span class="room-create-card__plus" aria-hidden="true"></span>
         </button>
       </div>
@@ -176,10 +182,9 @@ function getRoomStatusText(room) {
       aria-label="Создать комнату"
     >
       <form class="room-dialog__form" @submit.prevent="submitCreateRoom">
-        <input
+        <AppInput
           ref="createNameInput"
           v-model="roomName"
-          class="room-dialog__input"
           type="text"
           inputmode="text"
           autocomplete="off"
@@ -189,9 +194,8 @@ function getRoomStatusText(room) {
           maxlength="15"
           placeholder="Комната"
         />
-        <input
+        <AppInput
           v-model="roomPassword"
-          class="room-dialog__input"
           type="text"
           inputmode="numeric"
           pattern="[0-9]*"
@@ -204,20 +208,22 @@ function getRoomStatusText(room) {
           @input="updateRoomPassword"
         />
         <div class="room-dialog__actions">
-          <button
-            class="room-dialog__cancel"
+          <AppButton
+            variant="muted"
+            size="modal"
             type="button"
             @click="closeCreateDialog"
           >
             <span>Отмена</span>
-          </button>
-          <button
-            class="room-dialog__submit"
+          </AppButton>
+          <AppButton
+            variant="primary"
+            size="modal"
             type="submit"
             :disabled="!roomName.trim() || !roomPassword.trim()"
           >
             <span>Создать</span>
-          </button>
+          </AppButton>
         </div>
       </form>
     </div>
@@ -230,10 +236,9 @@ function getRoomStatusText(room) {
       aria-label="Войти в комнату"
     >
       <form class="room-dialog__form" @submit.prevent="submitJoinRoom">
-        <input
+        <AppInput
           ref="joinPasswordInput"
           v-model="joinPassword"
-          class="room-dialog__input"
           type="text"
           inputmode="numeric"
           pattern="[0-9]*"
@@ -246,20 +251,22 @@ function getRoomStatusText(room) {
           @input="updateJoinPassword"
         />
         <div class="room-dialog__actions">
-          <button
-            class="room-dialog__cancel"
+          <AppButton
+            variant="muted"
+            size="modal"
             type="button"
             @click="closeJoinDialog"
           >
             <span>Отмена</span>
-          </button>
-          <button
-            class="room-dialog__submit"
+          </AppButton>
+          <AppButton
+            variant="primary"
+            size="modal"
             type="submit"
             :disabled="!joinPassword.trim()"
           >
             <span>Войти</span>
-          </button>
+          </AppButton>
         </div>
       </form>
     </div>
@@ -267,12 +274,6 @@ function getRoomStatusText(room) {
 </template>
 
 <style scoped>
-.rooms-screen {
-  align-content: start;
-  gap: 10px;
-}
-
-.create-room-button,
 .connection-button {
   height: 100%;
   border: 0;
@@ -282,10 +283,6 @@ function getRoomStatusText(room) {
   color: var(--ink);
   font-size: 18px;
   font-weight: 600;
-}
-
-.create-room-button:disabled {
-  opacity: 0.55;
 }
 
 .connection-button {
@@ -308,14 +305,6 @@ function getRoomStatusText(room) {
   min-height: 0;
   overflow: hidden;
   padding: 5px;
-}
-
-.rooms-zone__title {
-  display: block;
-  margin: 0 0 5px;
-  color: var(--muted);
-  font-size: 24px;
-  line-height: 1;
 }
 
 .rooms-zone__content {
@@ -381,14 +370,6 @@ function getRoomStatusText(room) {
   opacity: 0.55;
 }
 
-.room-card:not(:disabled):active {
-  filter: brightness(1.06);
-  transform: translateY(2px);
-  box-shadow:
-    inset 0 0 0 1px rgba(243, 241, 219, 0.2),
-    inset 0 -10px 18px rgba(29, 29, 29, 0.2);
-}
-
 .room-card__text {
   position: relative;
   z-index: 1;
@@ -432,27 +413,67 @@ function getRoomStatusText(room) {
 }
 
 .room-create-card {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  min-height: 94px;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  background: var(--back);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(243, 241, 219, 0.94),
+      rgba(235, 229, 208, 0.72)
+    ),
+    repeating-linear-gradient(
+      135deg,
+      rgba(94, 84, 70, 0.08) 0,
+      rgba(94, 84, 70, 0.08) 8px,
+      transparent 8px,
+      transparent 16px
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(243, 241, 219, 0.64),
+    inset 0 -18px 26px rgba(94, 84, 70, 0.08);
 }
 
-.room-create-card:disabled {
-  opacity: 0.55;
+.room-create-card::before {
+  display: none;
+}
+
+.room-create-card::after {
+  box-shadow:
+    inset 0 0 0 1px rgba(94, 84, 70, 0.12),
+    inset 0 0 0 2px rgba(243, 241, 219, 0.42);
+}
+
+.room-create-card:not(:disabled):active {
+  border-color: rgba(94, 84, 70, 0.5);
+  background:
+    linear-gradient(90deg, rgba(243, 241, 219, 1), rgba(235, 229, 208, 0.84)),
+    repeating-linear-gradient(
+      135deg,
+      rgba(94, 84, 70, 0.1) 0,
+      rgba(94, 84, 70, 0.1) 8px,
+      transparent 8px,
+      transparent 16px
+    );
+}
+
+.room-create-card__text span {
+  color: rgba(94, 84, 70, 0.74);
+  text-shadow: none;
+}
+
+.room-create-card__text small {
+  color: rgba(94, 84, 70, 0.56);
+  text-shadow: none;
 }
 
 .room-create-card__plus {
   position: relative;
+  flex: 0 0 auto;
   display: block;
-  width: 52px;
-  height: 52px;
-  border: 1px dashed var(--line);
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(94, 84, 70, 0.26);
   border-radius: 50%;
   background: var(--page-back);
+  box-shadow: 0 8px 18px rgba(94, 84, 70, 0.14);
 }
 
 .room-create-card__plus::before,
@@ -464,7 +485,7 @@ function getRoomStatusText(room) {
   width: 20px;
   height: 2px;
   border-radius: 999px;
-  background: rgba(94, 84, 70, 0.42);
+  background: var(--ink);
   transform: translate(-50%, -50%);
 }
 
@@ -492,48 +513,9 @@ function getRoomStatusText(room) {
   background: var(--back-soft);
 }
 
-.room-dialog__input {
-  width: 100%;
-  min-height: 48px;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  padding: 0 10px;
-  background: var(--back);
-  color: var(--ink);
-  font-size: 24px;
-  line-height: normal;
-  outline: none;
-}
-
-.room-dialog__input:focus {
-  border-color: rgba(94, 84, 70, 0.5);
-}
-
 .room-dialog__actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-.room-dialog__actions button {
-  min-height: 44px;
-  border: none;
-  border-radius: 6px;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.room-dialog__cancel {
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--muted);
-}
-
-.room-dialog__submit {
-  background: var(--gold);
-  color: var(--ink);
-}
-
-.room-dialog__actions button:disabled {
-  opacity: 0.5;
 }
 </style>

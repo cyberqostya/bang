@@ -283,6 +283,8 @@ export const useRoomStore = defineStore("room", () => {
   }
 
   function checkTurnBlueCard(cardInstanceId) {
+    if (isDiscardingCards.value) return;
+
     send("game:action", {
       action: "checkTurnBlueCard",
       cardInstanceId,

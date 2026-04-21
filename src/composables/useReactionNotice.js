@@ -18,7 +18,7 @@ export function useReactionNotice(roomStore, reactionNow) {
     () => isReactionTarget.value || isReactionActor.value,
   );
   const reactionNoticeCardTitle = computed(
-    () => pendingReaction.value?.cardTitle || "БЭНГ",
+    () => pendingReaction.value?.cardTitle || "",
   );
   const reactionNoticeColor = computed(
     () => pendingReaction.value?.cardColor || "#c94a35",

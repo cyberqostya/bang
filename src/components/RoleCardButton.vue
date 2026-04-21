@@ -29,9 +29,13 @@ function closeRole() {
     <img :src="roleBackImage" alt="" />
   </button>
 
-  <div v-if="isOpen" class="role-card-overlay" @click.stop="closeRole">
+  <div
+    v-if="isOpen"
+    class="card-preview-overlay role-card-overlay"
+    @click.stop="closeRole"
+  >
     <button
-      class="role-card-preview"
+      class="card-preview-surface role-card-preview"
       type="button"
       :aria-label="role?.label"
       @click.stop="closeRole"
@@ -63,19 +67,7 @@ function closeRole() {
   border-radius: 6px;
 }
 
-.role-card-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  background: rgba(29, 29, 29, 0.28);
-}
-
 .role-card-preview {
-  width: var(--card-preview-width);
-  border-radius: 6px;
-  background: transparent;
   perspective: 900px;
 }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { useCardLeaveAnimation } from "../composables/useCardLeaveAnimation.js";
 import { useRoomStore } from "../stores/roomStore.js";
 import CardPreview from "./CardPreview.vue";
@@ -30,13 +30,9 @@ const canCheckTurnCard = computed(
 );
 const { freezeLeavingCard } = useCardLeaveAnimation();
 
-watch(isReactionTarget, (isTarget) => {
-  if (isTarget) {
-    closePreview();
-  }
-});
-
 function handleCardTap(card) {
+  if (roomStore.isDiscardingCards) return;
+
   if (
     canCheckTurnCard.value &&
     card.instanceId === turnCheck.value?.cardInstanceId
@@ -47,11 +43,10 @@ function handleCardTap(card) {
 
   if (card.cardId === "barrel" && canCheckBarrel.value) {
     roomStore.checkBarrel();
-    return;
   }
+}
 
-  if (roomStore.isMyTurn || pendingReaction.value) return;
-
+function openPreview(card) {
   previewCard.value = card;
 }
 
@@ -64,7 +59,11 @@ function closePreview() {
   <PlayZone title="Постоянные карты" variant="hand">
     <TransitionGroup
       class="permanent-card-strip"
-      name="hand-card"
+      :class="{
+        'permanent-card-strip_empty':
+          (roomStore.ownPlayer?.blueCards || []).length === 0,
+      }"
+      name="game-card"
       tag="div"
       :duration="{ enter: 360, leave: 680 }"
       aria-label="Постоянные карты"
@@ -76,14 +75,9 @@ function closePreview() {
         :key="card.instanceId"
         :card="card"
         :is-attention="card.instanceId === turnCheck?.cardInstanceId"
+        @preview="openPreview"
         @select="handleCardTap(card)"
       />
-      <span
-        v-if="(roomStore.ownPlayer?.blueCards || []).length === 0"
-        key="empty-permanent-card-spacer"
-        class="permanent-card-strip__empty-card"
-        aria-hidden="true"
-      ></span>
     </TransitionGroup>
     <CardPreview v-if="previewCard" :card="previewCard" @close="closePreview" />
   </PlayZone>
@@ -91,7 +85,10 @@ function closePreview() {
 
 <style scoped>
 .permanent-card-strip {
+  --card-animation-headroom: 96px;
+
   position: relative;
+  z-index: 8;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -101,10 +98,16 @@ function closePreview() {
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
-  padding: 5px;
+  margin-top: calc(-1 * var(--card-animation-headroom));
+  padding: calc(var(--card-animation-headroom) + 15px) 5px 15px;
   scrollbar-width: thin;
   scrollbar-color: rgba(94, 84, 70, 0.5) rgba(94, 84, 70, 0.12);
   -webkit-overflow-scrolling: touch;
+  pointer-events: none;
+}
+
+.permanent-card-strip > * {
+  pointer-events: auto;
 }
 
 .permanent-card-strip::-webkit-scrollbar {
@@ -121,7 +124,8 @@ function closePreview() {
   background: rgba(94, 84, 70, 0.48);
 }
 
-.permanent-card-strip__empty-card {
+.permanent-card-strip_empty::before {
+  content: "";
   flex: 0 0 var(--card-width);
   width: var(--card-width);
   aspect-ratio: 0.625;
@@ -129,51 +133,4 @@ function closePreview() {
   visibility: hidden;
 }
 
-.hand-card-move,
-.hand-card-enter-active {
-  transition:
-    opacity 360ms ease,
-    transform 360ms ease;
-}
-
-.hand-card-enter-from {
-  opacity: 0;
-  transform: translateY(-180px) rotate(10deg) scale(0.86);
-}
-
-.hand-card-enter-to,
-.hand-card-leave-from {
-  opacity: 1;
-  transform: translateY(0) rotate(0deg) scale(1);
-}
-
-.hand-card-leave-active {
-  width: var(--leaving-card-width);
-  max-width: var(--leaving-card-width);
-  flex-basis: var(--leaving-card-width);
-  overflow: hidden;
-  transition:
-    flex-basis 260ms ease 420ms,
-    width 260ms ease 420ms,
-    max-width 260ms ease 420ms;
-  animation: hand-card-fly-away 420ms ease forwards;
-}
-
-.hand-card-leave-to {
-  width: 0;
-  max-width: 0;
-  flex-basis: 0;
-}
-
-@keyframes hand-card-fly-away {
-  0% {
-    opacity: 1;
-    transform: translateY(0) rotate(0deg) scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateY(-220px) rotate(-16deg) scale(0.76);
-  }
-}
 </style>

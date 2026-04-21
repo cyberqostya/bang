@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
+import { useCardLeaveAnimation } from "../composables/useCardLeaveAnimation.js";
 import CardPreview from "./CardPreview.vue";
-import GameCardVisual from "./GameCardVisual.vue";
+import GameCardButton from "./GameCardButton.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
@@ -11,15 +12,8 @@ const pendingReaction = computed(
   () => roomStore.room.game?.pendingReaction || null,
 );
 const isReactionActive = computed(() => Boolean(pendingReaction.value));
-const isReactionTarget = computed(
-  () =>
-    pendingReaction.value?.targetPlayerId === roomStore.playerId ||
-    pendingReaction.value?.targetPlayerIds?.includes(roomStore.playerId),
-);
 const isPreviewOpen = ref(false);
-const canPreviewWeapon = computed(
-  () => Boolean(weapon.value) && !roomStore.isMyTurn && !isReactionActive.value,
-);
+const { freezeLeavingCard } = useCardLeaveAnimation();
 const canActivateWeaponProperty = computed(
   () =>
     Boolean(weapon.value?.propertyAction) &&
@@ -34,25 +28,24 @@ const isWeaponPropertyActive = computed(() => {
   return Boolean(roomStore.ownPlayer?.activeEffectAllowances?.[effectLimitKey]);
 });
 
-watch(isReactionTarget, (isTarget) => {
-  if (isTarget) {
-    closePreview();
-  }
-});
-
 function handleWeaponTap() {
   if (canActivateWeaponProperty.value) {
     roomStore.activateWeaponProperty();
-    return;
   }
+}
 
-  if (!canPreviewWeapon.value) return;
-
+function openPreview() {
   isPreviewOpen.value = true;
 }
 
 function closePreview() {
   isPreviewOpen.value = false;
+}
+
+function freezeLeavingWeapon(element) {
+  if (element.classList?.contains("game-card-button")) {
+    freezeLeavingCard(element);
+  }
 }
 </script>
 
@@ -60,28 +53,36 @@ function closePreview() {
   <div
     class="weapon-slot"
     :class="{
-      'weapon-slot_filled': weapon,
-      'weapon-slot_previewable': canPreviewWeapon,
       'weapon-slot_property-ready': canActivateWeaponProperty,
-      'weapon-slot_property-active': isWeaponPropertyActive,
     }"
     aria-label="Оружие"
   >
-    <button
-      v-if="weapon"
-      class="weapon-slot__card"
-      type="button"
-      :aria-label="weapon.title"
-      :disabled="!canPreviewWeapon && !canActivateWeaponProperty"
-      @click.stop="handleWeaponTap"
+    <Transition
+      name="game-card"
+      :duration="{ enter: 360, leave: 680 }"
+      @before-leave="freezeLeavingWeapon"
     >
-      <GameCardVisual :card="weapon" />
-    </button>
-    <img v-else class="weapon-slot__weapon" src="/images/colt.webp" alt="" />
-    <span v-if="!weapon" class="weapon-slot__range" aria-hidden="true">
-      <span>{{ attackRange }}</span>
-    </span>
-    <CardPreview v-if="isPreviewOpen && weapon" :card="weapon" @close="closePreview" />
+      <GameCardButton
+        v-if="weapon"
+        :key="weapon.instanceId"
+        class="weapon-slot__card"
+        :card="weapon"
+        :is-attention="isWeaponPropertyActive"
+        @activate="handleWeaponTap"
+        @preview="openPreview"
+      />
+      <span v-else key="default-weapon" class="weapon-slot__default">
+        <img class="weapon-slot__weapon" src="/images/colt.webp" alt="" />
+        <span class="weapon-slot__range" aria-hidden="true">
+          <span>{{ attackRange }}</span>
+        </span>
+      </span>
+    </Transition>
+    <CardPreview
+      v-if="isPreviewOpen && weapon"
+      :card="weapon"
+      @close="closePreview"
+    />
   </div>
 </template>
 
@@ -89,51 +90,57 @@ function closePreview() {
 .weapon-slot {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
   place-items: center;
   flex: 0 0 var(--card-width);
   width: var(--card-width);
   aspect-ratio: 0.625;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+}
+
+.weapon-slot__default {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  place-items: center;
+  width: 100%;
+  height: 100%;
   border: 1px dashed #5e5446;
   border-radius: 6px;
   padding: 8px 6px 6px;
   background: rgba(243, 241, 219, 0.4);
-  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.weapon-slot_filled {
-  display: block;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  box-shadow: 0 8px 18px rgba(94, 84, 70, 0.14);
+.weapon-slot :deep(.game-card-button.game-card-leave-active) {
+  position: absolute;
+  inset: 0;
 }
 
-.weapon-slot__card {
-  display: block;
-  width: 100%;
-  border-radius: 6px;
-  background: transparent;
+.weapon-slot :deep(.game-card-button.game-card-enter-active) {
+  position: absolute;
+  inset: 0;
 }
 
-.weapon-slot__card:disabled {
-  cursor: default;
+.weapon-slot__default.game-card-enter-active,
+.weapon-slot__default.game-card-leave-active {
+  transition: opacity 220ms ease;
 }
 
-.weapon-slot_previewable .weapon-slot__card {
-  cursor: zoom-in;
+.weapon-slot__default.game-card-enter-from,
+.weapon-slot__default.game-card-leave-to {
+  opacity: 0;
+}
+
+.weapon-slot__default.game-card-enter-to,
+.weapon-slot__default.game-card-leave-from {
+  opacity: 1;
 }
 
 .weapon-slot_property-ready .weapon-slot__card {
   cursor: pointer;
-}
-
-.weapon-slot_property-active {
-  outline: 2px solid rgba(240, 160, 32, 0.92);
-  outline-offset: 5px;
-  box-shadow:
-    0 8px 18px rgba(94, 84, 70, 0.14),
-    0 0 18px rgba(240, 160, 32, 0.38);
 }
 
 .weapon-slot__weapon {
@@ -187,5 +194,4 @@ function closePreview() {
   font-weight: 700;
   line-height: 1;
 }
-
 </style>

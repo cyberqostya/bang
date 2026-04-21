@@ -344,8 +344,8 @@ onBeforeUnmount(() => {
   top: 50%;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   transform: translate(-50%, -50%)
     translate(
       calc(var(--card-status-x, 0) * var(--status-radius)),

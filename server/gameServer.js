@@ -682,6 +682,7 @@ export function startGameServer() {
       type: "discard",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: discardedCard.cardId,
       cardTitle: getCardEventTitle(discardedCard),
       cardColor: getCardEventColor(discardedCard),
     });
@@ -824,6 +825,7 @@ export function startGameServer() {
       type: "card",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: card.cardId,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
       previewCard: getReactionEventPreviewCard(
@@ -845,8 +847,6 @@ export function startGameServer() {
       healthLoss: result.healthLoss,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
-      targetPrompt: configForCard.targetPrompt,
-      actorPendingPrompt: configForCard.actorPendingPrompt,
     });
 
     return {};
@@ -881,8 +881,6 @@ export function startGameServer() {
       })),
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
-      targetPrompt: configForCard.targetPrompt,
-      actorPendingPrompt: configForCard.actorPendingPrompt,
     });
 
     return {};
@@ -933,6 +931,7 @@ export function startGameServer() {
       type: "equip",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: card.cardId,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
     });
@@ -976,6 +975,7 @@ export function startGameServer() {
       type: "card",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: card.cardId,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
       targetName: result.targetPlayer.name,
@@ -1023,6 +1023,7 @@ export function startGameServer() {
       type: "heal",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: card.cardId,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
       amount: configForCard.healAmount || 1,
@@ -1034,6 +1035,7 @@ export function startGameServer() {
       type: "cardOnly",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: card.cardId,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
       previewCard: getReactionEventPreviewCard(
@@ -1046,7 +1048,7 @@ export function startGameServer() {
   }
 
   function getReactionEventPreviewCard(room, actor, card, configForCard) {
-    if (!configForCard?.targetPrompt || card.cardId === "bang") return null;
+    if (!["gatling", "indians"].includes(configForCard?.action)) return null;
 
     return getPublicCard(room, actor, card, { includePlayState: false });
   }
@@ -1069,6 +1071,7 @@ export function startGameServer() {
       type: "cardDraw",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: card.cardId,
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
       cardsCount: configForCard.drawCount || 1,
@@ -1108,6 +1111,7 @@ export function startGameServer() {
       type: "propertyUse",
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      cardId: actor.weapon.cardId,
       cardTitle: getCardEventTitle(actor.weapon),
       cardColor: weaponConfig.eventColor,
     });
@@ -1572,6 +1576,7 @@ export function startGameServer() {
         type: "reaction",
         actorName: targetPlayer.name,
         actorRoleId: targetPlayer.roleId,
+        cardId: card.cardId,
         cardTitle: getCardEventTitle(card),
         cardColor: configForCard.eventColor,
       });
@@ -2273,6 +2278,7 @@ export function startGameServer() {
 
   function getPublicCheckCard(card) {
     return {
+      cardId: card.cardId,
       title: getCardEventTitle(card),
       rank: card.rank,
       suit: card.suit,
@@ -2293,6 +2299,7 @@ export function startGameServer() {
 
   function getBarrelCheckResult(drawnCard, isSuccess) {
     return {
+      checkCardId: "barrel",
       checkCardTitle: cardConfig.barrel.eventTitle,
       checkCardColor: cardConfig.barrel.eventColor,
       resultTitle: isSuccess ? "УСПЕХ" : "ПРОВАЛ",
@@ -2310,6 +2317,7 @@ export function startGameServer() {
       actorPlayerId: actor.playerId,
       actorName: actor.name,
       actorRoleId: actor.roleId,
+      checkCardId: options.checkCardId || checkCard?.cardId,
       checkCardTitle: options.checkCardTitle || getCardEventTitle(checkCard),
       checkCardColor:
         options.checkCardColor || cardConfig[checkCard?.cardId]?.eventColor,

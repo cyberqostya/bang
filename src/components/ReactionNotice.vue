@@ -24,13 +24,17 @@ defineProps({
   },
   reactionNoticeCardTitle: {
     type: String,
-    default: "БЭНГ",
+    default: "",
   },
   reactionNoticeColor: {
     type: String,
     default: "#c94a35",
   },
   reactionProgressStyle: {
+    type: Object,
+    default: () => ({}),
+  },
+  checkProgressStyle: {
     type: Object,
     default: () => ({}),
   },
@@ -51,9 +55,16 @@ defineProps({
     class="reaction-notice reaction-notice_check"
     aria-live="assertive"
   >
+    <span
+      class="reaction-notice__progress reaction-notice__progress_check"
+      :style="checkProgressStyle"
+    ></span>
     <div class="reaction-notice__copy">
       <p class="reaction-notice__subtext reaction-notice__check-text">
-        <GameEventMessage :event="turnCheckNotice" tone="light" />
+        <GameEventMessage
+          :event="turnCheckNotice"
+          tone="light"
+        />
       </p>
     </div>
   </section>
@@ -163,6 +174,7 @@ defineProps({
   right: 0;
   top: 0;
   height: 5px;
+  background: var(--gold);
   transform-origin: left center;
   transition: transform 220ms linear;
   will-change: transform;
@@ -192,9 +204,8 @@ defineProps({
 
 .reaction-notice__subtext {
   margin: 0;
-  color: rgba(255, 255, 255, 0.86);
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1;
   text-wrap: balance;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);

@@ -107,10 +107,6 @@ input {
   line-height: normal;
 }
 
-button:active {
-  transform: translateY(1px);
-}
-
 button:focus-visible {
   outline: 3px solid var(--gold);
   outline-offset: 3px;
@@ -120,4 +116,32 @@ img {
   display: block;
   width: 100%;
   pointer-events: none;
+}
+
+.card-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(29, 29, 29, 0.28);
+}
+
+.card-preview-surface {
+  width: var(--card-preview-width);
+  border-radius: 6px;
+  background: transparent;
+  animation: card-preview-in 220ms ease forwards;
+}
+
+@keyframes card-preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.72);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }

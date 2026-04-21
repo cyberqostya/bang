@@ -37,19 +37,19 @@ defineProps({
   position: absolute;
   top: 0;
   left: 50%;
-  z-index: 1;
+  z-index: 2;
   display: block;
   transform: translate(-50%, -50%);
   padding: 0 10px;
   background: var(--back-soft);
-  border: 1px dashed var(--line);
+  border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--muted);
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 16px;
   letter-spacing: -0.05em;
   line-height: 1;
   white-space: nowrap;
+  font-style: italic;
 }
 
 .play-zone__content {
@@ -57,14 +57,15 @@ defineProps({
   min-width: 0;
   height: 100%;
   min-height: 0;
-  padding: 5px;
+}
+
+.play-zone_phases .play-zone__content {
+  border-bottom: 1px dashed var(--line);
 }
 
 .play-zone_hand .play-zone__content {
   display: flex;
   align-items: center;
-  overflow: hidden;
-  padding: 0;
   border-top: 1px dashed var(--line);
 }
 
@@ -81,6 +82,6 @@ defineProps({
 .play-zone_events .play-zone__content {
   overflow: hidden;
   border-bottom: 1px dashed var(--line);
-  padding-top: 5px;
+  padding: 5px;
 }
 </style>

@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { useCardLeaveAnimation } from "../composables/useCardLeaveAnimation.js";
 import CardPreview from "./CardPreview.vue";
 import HandCard from "./HandCard.vue";
@@ -8,33 +8,17 @@ import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
 const handCards = computed(() => roomStore.ownHand);
-const pendingReaction = computed(
-  () => roomStore.room.game?.pendingReaction || null,
-);
-const isReactionActive = computed(() => Boolean(pendingReaction.value));
-const isReactionTarget = computed(
-  () =>
-    pendingReaction.value?.targetPlayerId === roomStore.playerId ||
-    pendingReaction.value?.targetPlayerIds?.includes(roomStore.playerId),
-);
 const previewCard = ref(null);
 const { freezeLeavingCard } = useCardLeaveAnimation();
-
-watch(isReactionTarget, (isTarget) => {
-  if (isTarget) {
-    closePreview();
-  }
-});
 
 function handleCardTap(card) {
   if (roomStore.isDiscardingCards || card.isPlayable) {
     roomStore.selectCard(card.instanceId);
-    return;
   }
+}
 
-  if (!roomStore.isMyTurn && !isReactionActive.value) {
-    previewCard.value = card;
-  }
+function openPreview(card) {
+  previewCard.value = card;
 }
 
 function closePreview() {
@@ -46,7 +30,7 @@ function closePreview() {
   <PlayZone title="Рука" variant="hand">
     <TransitionGroup
       class="hand-strip"
-      name="hand-card"
+      name="game-card"
       tag="div"
       :duration="{ enter: 360, leave: 680 }"
       @before-leave="freezeLeavingCard"
@@ -64,6 +48,7 @@ function closePreview() {
         "
         :can-select="card.isPlayable || roomStore.isDiscardingCards"
         :is-discarding="roomStore.isDiscardingCards"
+        @preview="openPreview"
         @select="handleCardTap(card)"
       />
       <span
@@ -80,7 +65,10 @@ function closePreview() {
 
 <style scoped>
 .hand-strip {
+  --card-animation-headroom: 96px;
+
   position: relative;
+  z-index: 8;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -88,12 +76,17 @@ function closePreview() {
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
-  overflow-y: hidden;
   overscroll-behavior-x: contain;
-  padding: 5px;
   scrollbar-width: thin;
   scrollbar-color: rgba(94, 84, 70, 0.5) rgba(94, 84, 70, 0.12);
   -webkit-overflow-scrolling: touch;
+  margin-top: calc(-1 * var(--card-animation-headroom));
+  padding: calc(var(--card-animation-headroom) + 15px) 5px 5px;
+  pointer-events: none;
+}
+
+.hand-strip > * {
+  pointer-events: auto;
 }
 
 .hand-strip::-webkit-scrollbar {
@@ -117,53 +110,4 @@ function closePreview() {
   pointer-events: none;
   visibility: hidden;
 }
-
-.hand-card-move,
-.hand-card-enter-active {
-  transition:
-    opacity 360ms ease,
-    transform 360ms ease;
-}
-
-.hand-card-enter-from {
-  opacity: 0;
-  transform: translateY(-180px) rotate(10deg) scale(0.86);
-}
-
-.hand-card-enter-to,
-.hand-card-leave-from {
-  opacity: 1;
-  transform: translateY(0) rotate(0deg) scale(1);
-}
-
-.hand-card-leave-active {
-  width: var(--leaving-card-width);
-  max-width: var(--leaving-card-width);
-  flex-basis: var(--leaving-card-width);
-  overflow: hidden;
-  transition:
-    flex-basis 260ms ease 420ms,
-    width 260ms ease 420ms,
-    max-width 260ms ease 420ms;
-  animation: hand-card-fly-away 420ms ease forwards;
-}
-
-.hand-card-leave-to {
-  width: 0;
-  max-width: 0;
-  flex-basis: 0;
-}
-
-@keyframes hand-card-fly-away {
-  0% {
-    opacity: 1;
-    transform: translateY(0) rotate(0deg) scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateY(-220px) rotate(-16deg) scale(0.76);
-  }
-}
-
 </style>

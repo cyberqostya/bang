@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import AppButton from "../components/AppButton.vue";
 import AppScreen from "../components/AppScreen.vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
@@ -10,22 +11,24 @@ import CardPreview from "../components/CardPreview.vue";
 import CharacterSlot from "../components/CharacterSlot.vue";
 import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
-import GameCardVisual from "../components/GameCardVisual.vue";
+import GameCardButton from "../components/GameCardButton.vue";
 import ReactionNotice from "../components/ReactionNotice.vue";
 import RoleCardButton from "../components/RoleCardButton.vue";
 import WeaponSlot from "../components/WeaponSlot.vue";
 import { useGameResult } from "../composables/useGameResult.js";
 import { useReactionNotice } from "../composables/useReactionNotice.js";
 import { useRoomStore } from "../stores/roomStore.js";
+import { navigateTo } from "../utils/navigation.js";
 
 const roomStore = useRoomStore();
 const viewMode = ref("cards");
 const eventFeedElement = ref(null);
-const eventPreviewCard = ref(null);
+const selectedActionPreviewCard = ref(null);
 const isApplyingCardOnPlayers = ref(false);
 const isLeaveGameDialogOpen = ref(false);
 const isTurnNoticeOpen = ref(false);
 const turnCheckNotice = ref(null);
+const turnCheckNoticeStartedAt = ref(0);
 const isDeathNoticeAccepted = ref(false);
 const activePhaseIndex = ref(0);
 const wasDiscardingCards = ref(false);
@@ -35,6 +38,7 @@ const reactionNow = ref(Date.now());
 const finishDelayLeft = ref(0);
 let reactionCountdownTimer = null;
 let turnCheckNoticeTimer = null;
+let turnCheckProgressTimer = null;
 const gameEvents = computed(() => roomStore.room.game?.events || []);
 const { resultDialogSegments } = useGameResult(roomStore);
 const {
@@ -52,6 +56,21 @@ const {
 const shouldShowTurnCheckNotice = computed(
   () => Boolean(turnCheckNotice.value) && !shouldShowReactionOverlay.value,
 );
+const turnCheckProgressStyle = computed(() => {
+  if (!turnCheckNoticeStartedAt.value) {
+    return { transform: "scaleX(0)" };
+  }
+
+  const ratio = Math.max(
+    0,
+    Math.min(
+      1,
+      1 - (reactionNow.value - turnCheckNoticeStartedAt.value) / 5000,
+    ),
+  );
+
+  return { transform: `scaleX(${ratio})` };
+});
 const turnNoticePlayerLabel = computed(() => {
   const ownPlayer = roomStore.ownPlayer;
 
@@ -176,7 +195,6 @@ watch(
     ) {
       viewMode.value = "players";
       roomStore.cancelSelectedCard();
-      closeEventPreview();
       activePhaseIndex.value = 0;
       return;
     }
@@ -229,7 +247,6 @@ watch(
     if (isReactionTarget.value) {
       viewMode.value = "cards";
       roomStore.cancelSelectedCard();
-      closeEventPreview();
     } else if (wasParticipant && !isReactionActor.value) {
       viewMode.value = "players";
     }
@@ -242,7 +259,7 @@ watch(
 
 watch(isReactionTarget, (isTarget) => {
   if (isTarget) {
-    closeEventPreview();
+    selectedActionPreviewCard.value = null;
   }
 });
 
@@ -260,6 +277,7 @@ watch(
 
 onBeforeUnmount(() => {
   window.clearInterval(reactionCountdownTimer);
+  window.clearInterval(turnCheckProgressTimer);
   window.clearTimeout(turnCheckNoticeTimer);
 });
 
@@ -281,16 +299,6 @@ function showCardsView() {
   }
 
   viewMode.value = "cards";
-}
-
-function openEventPreview(card) {
-  if (isReactionTarget.value) return;
-
-  eventPreviewCard.value = card;
-}
-
-function closeEventPreview() {
-  eventPreviewCard.value = null;
 }
 
 function showOwnTurnCheckNotice() {
@@ -322,15 +330,24 @@ function showOwnTurnCheckNotice() {
   }
 
   turnCheckNotice.value = latestTurnCheckEvent;
+  turnCheckNoticeStartedAt.value = Date.now();
+  reactionNow.value = Date.now();
   lastShownTurnCheckEventId.value = latestTurnCheckEvent.id;
   window.clearTimeout(turnCheckNoticeTimer);
+  window.clearInterval(turnCheckProgressTimer);
+  turnCheckProgressTimer = window.setInterval(() => {
+    reactionNow.value = Date.now();
+  }, 200);
   turnCheckNoticeTimer = window.setTimeout(clearTurnCheckNotice, 5000);
 }
 
 function clearTurnCheckNotice() {
+  window.clearInterval(turnCheckProgressTimer);
   window.clearTimeout(turnCheckNoticeTimer);
+  turnCheckProgressTimer = null;
   turnCheckNoticeTimer = null;
   turnCheckNotice.value = null;
+  turnCheckNoticeStartedAt.value = 0;
 }
 
 async function scrollEventsToBottom() {
@@ -403,34 +420,54 @@ function handleDrawPhase() {
   activePhaseIndex.value = Math.max(activePhaseIndex.value, 0);
   roomStore.drawPhase();
 }
+
+function handleSelectedActionClick() {
+  roomStore.cancelSelectedCard();
+}
+
+function openSelectedActionPreview(card) {
+  selectedActionPreviewCard.value = card;
+}
+
+function closeSelectedActionPreview() {
+  selectedActionPreviewCard.value = null;
+}
+
+function openCardKnowledge(cardId) {
+  if (!cardId) return;
+
+  navigateTo(`/cards?card=${encodeURIComponent(cardId)}`);
+}
 </script>
 
 <template>
   <AppScreen class="game-screen">
     <AppHeader>
       <template #left>
-        <button
-          class="leave-game-button"
+        <AppButton
+          variant="muted"
+          size="header"
           type="button"
           @click.stop="openLeaveGameDialog"
         >
           Выход
-        </button>
+        </AppButton>
       </template>
       <template #right>
-        <button
-          class="header-switch"
+        <AppButton
+          variant="muted"
+          size="header"
           type="button"
           :disabled="isHeaderSwitchDisabled"
           @click.stop="toggleViewMode"
         >
           {{ viewMode === "cards" ? "К игрокам" : "К картам" }}
-        </button>
+        </AppButton>
       </template>
     </AppHeader>
 
     <section v-if="viewMode === 'players'" class="players-view">
-      <PlayZone title="События" variant="events">
+      <PlayZone title="Журнал событий" variant="events">
         <div
           ref="eventFeedElement"
           class="event-feed"
@@ -443,10 +480,7 @@ function handleDrawPhase() {
             :class="{ 'event-feed__message_turn': event.type === 'turn' }"
           >
             <span class="event-feed__text">
-              <GameEventMessage
-                :event="event"
-                @preview-card="openEventPreview"
-              />
+              <GameEventMessage :event="event" @open-card="openCardKnowledge" />
             </span>
             <time v-if="event.createdAt" class="event-feed__time">
               {{ formatMessageTime(event.createdAt) }}
@@ -455,16 +489,16 @@ function handleDrawPhase() {
         </div>
       </PlayZone>
       <GamePlayersTable @show-cards="showCardsView" />
-      <button
+      <GameCardButton
         v-if="roomStore.selectedCard?.selectionView === 'players'"
         class="selected-action-card"
-        type="button"
+        :card="roomStore.selectedCard"
         :aria-label="`Отменить ${roomStore.selectedCard.title}`"
-        @click.stop="roomStore.cancelSelectedCard"
-      >
-        <GameCardVisual :card="roomStore.selectedCard" />
-        <span class="selected-action-card__cancel"></span>
-      </button>
+        is-floating
+        mark="cancel"
+        @activate="handleSelectedActionClick"
+        @preview="openSelectedActionPreview"
+      />
     </section>
 
     <section
@@ -479,24 +513,27 @@ function handleDrawPhase() {
         :class="{ 'turn-phases-zone_active': roomStore.isMyTurn }"
       >
         <div class="turn-phases">
-          <button
-            class="turn-phase-button turn-phase-button_draw"
+          <AppButton
+            variant="phase"
+            size="phase"
             type="button"
             :disabled="!canUseDrawPhase || activePhaseIndex > 0"
             @click.stop="handleDrawPhase"
           >
             Набор
-          </button>
-          <button
-            class="turn-phase-button"
+          </AppButton>
+          <AppButton
+            variant="phase"
+            size="phase"
             type="button"
             :disabled="isPlayPhaseDisabled"
             @click.stop="handlePlayPhase"
           >
             Розыгрыш
-          </button>
-          <button
-            class="turn-phase-button"
+          </AppButton>
+          <AppButton
+            variant="phase"
+            size="phase"
             type="button"
             :disabled="
               !roomStore.isMyTurn ||
@@ -506,7 +543,7 @@ function handleDrawPhase() {
             @click.stop="handleDiscardPhase"
           >
             Сброс
-          </button>
+          </AppButton>
         </div>
       </PlayZone>
 
@@ -542,9 +579,9 @@ function handleDrawPhase() {
     >
       <form class="turn-notice-dialog__form" @submit.prevent="closeTurnNotice">
         <p>Твоя очередь ходить, {{ turnNoticePlayerLabel }}</p>
-        <button class="turn-notice-dialog__submit" type="submit">
+        <AppButton variant="primary" size="modal" type="submit">
           За дело
-        </button>
+        </AppButton>
       </form>
     </div>
 
@@ -561,14 +598,15 @@ function handleDrawPhase() {
           Вы действительно хотите покинуть игру? Ваш персонаж мгновенно умрёт.
         </p>
         <div class="leave-game-dialog__actions">
-          <button
-            class="leave-game-dialog__cancel"
+          <AppButton
+            variant="muted"
+            size="modal"
             type="button"
             @click="closeLeaveGameDialog"
           >
             Нет
-          </button>
-          <button class="leave-game-dialog__submit" type="submit">Да</button>
+          </AppButton>
+          <AppButton variant="primary" size="modal" type="submit">Да</AppButton>
         </div>
       </form>
     </div>
@@ -586,9 +624,9 @@ function handleDrawPhase() {
         @submit.prevent="acceptDeathNotice"
       >
         <p>Вы убиты</p>
-        <button class="death-notice-dialog__submit" type="submit">
+        <AppButton variant="primary" size="modal" type="submit">
           Принять смерть
-        </button>
+        </AppButton>
       </form>
     </div>
 
@@ -610,6 +648,7 @@ function handleDrawPhase() {
       <ReactionNotice
         v-if="shouldShowTurnCheckNotice"
         mode="check"
+        :check-progress-style="turnCheckProgressStyle"
         :turn-check-notice="turnCheckNotice"
       />
     </Transition>
@@ -632,7 +671,9 @@ function handleDrawPhase() {
             <span v-else>{{ segment.text }}</span>
           </template>
         </p>
-        <button
+        <AppButton
+          variant="primary"
+          size="modal"
           type="button"
           :disabled="!canFinishGameRoom"
           @click="roomStore.finishGameRoom"
@@ -642,51 +683,21 @@ function handleDrawPhase() {
               ? "Завершить игру"
               : `Завершить игру через ${finishDelayLeft}`
           }}
-        </button>
+        </AppButton>
       </div>
     </div>
     <CardPreview
-      v-if="eventPreviewCard"
-      :card="eventPreviewCard"
-      @close="closeEventPreview"
+      v-if="selectedActionPreviewCard"
+      :card="selectedActionPreviewCard"
+      @close="closeSelectedActionPreview"
     />
   </AppScreen>
 </template>
 
 <style scoped>
-.header-switch {
-  height: 100%;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 10px;
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--muted);
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.header-switch:disabled {
-  cursor: default;
-  opacity: 0.42;
-}
-
-.leave-game-button {
-  height: 100%;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 10px;
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--muted);
-  font-size: 20px;
-  font-weight: 600;
-}
-
 .cards-view {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
-  min-width: 0;
-  min-height: 0;
-  padding-bottom: 5px;
 }
 
 .cards-view_with-phases {
@@ -698,7 +709,6 @@ function handleDrawPhase() {
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  padding: 0 0 5px;
 }
 
 .selected-action-card {
@@ -706,59 +716,6 @@ function handleDrawPhase() {
   right: 15px;
   top: 65px;
   z-index: 15;
-  width: var(--card-width);
-  border-radius: 6px;
-  background: transparent;
-  box-shadow: 0 12px 26px rgba(29, 29, 29, 0.28);
-  animation: selected-action-float 1800ms ease-in-out infinite;
-}
-
-.selected-action-card :deep(.game-card-visual__image) {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 6px;
-}
-
-.selected-action-card__cancel {
-  position: absolute;
-  right: -5px;
-  top: -5px;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--ink);
-  box-shadow: 0 12px 26px rgba(29, 29, 29, 0.28);
-}
-
-.selected-action-card__cancel::before,
-.selected-action-card__cancel::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 10px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--back-soft);
-  transform: translate(-50%, -50%) rotate(45deg);
-}
-
-.selected-action-card__cancel::after {
-  transform: translate(-50%, -50%) rotate(-45deg);
-}
-
-@keyframes selected-action-float {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-
-  50% {
-    transform: translateY(-5px) scale(1.04);
-  }
 }
 
 .event-feed {
@@ -820,6 +777,7 @@ function handleDrawPhase() {
   justify-content: space-between;
   gap: 10px;
   min-width: 0;
+  padding: 15px 5px;
 }
 
 .table-cards {
@@ -833,38 +791,50 @@ function handleDrawPhase() {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
+  padding: 5px;
 }
 
-.turn-phases-zone_active {
-  outline: 2px solid rgba(240, 160, 32, 0.75);
-  outline-offset: -2px;
-  box-shadow:
-    inset 0 0 0 1px rgba(243, 241, 219, 0.7),
-    0 0 18px rgba(240, 160, 32, 0.22);
+.turn-phases-zone_active .play-zone__content {
+  overflow: hidden;
+  border-bottom: none;
 }
 
-.turn-phases-zone_active :deep(.play-zone__content) {
-  background: rgba(240, 160, 32, 0.08);
+.turn-phases-zone_active::before,
+.turn-phases-zone_active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 4px;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--gold) 0,
+    var(--gold) 8px,
+    var(--back-soft) 8px,
+    var(--back-soft) 16px
+  );
+  background-size: 23px 23px;
+  animation: turn-phase-stripes 720ms linear infinite;
 }
 
-.turn-phase-button {
-  min-height: 42px;
-  border-radius: 6px;
-  padding: 0 10px;
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--ink);
-  font-size: 19px;
-  font-weight: 600;
+.turn-phases-zone_active::before {
+  top: -2px;
 }
 
-.turn-phase-button:not(:disabled) {
-  background: var(--gold);
-  color: var(--ink);
+.turn-phases-zone_active::after {
+  bottom: -2px;
 }
 
-.turn-phase-button:disabled {
-  cursor: default;
-  opacity: 0.48;
+@keyframes turn-phase-stripes {
+  from {
+    background-position-x: 0;
+  }
+
+  to {
+    background-position-x: 23px;
+  }
 }
 
 .turn-notice-dialog,
@@ -917,33 +887,4 @@ function handleDrawPhase() {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
-
-.turn-notice-dialog__submit,
-.leave-game-dialog__actions button,
-.death-notice-dialog__submit,
-.result-dialog__panel button {
-  min-height: 44px;
-  border-radius: 6px;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.result-dialog__panel button:disabled {
-  cursor: default;
-  opacity: 0.52;
-}
-
-.leave-game-dialog__cancel {
-  background: rgba(94, 84, 70, 0.16);
-  color: var(--muted);
-}
-
-.turn-notice-dialog__submit,
-.leave-game-dialog__submit,
-.death-notice-dialog__submit,
-.result-dialog__panel button {
-  background: var(--gold);
-  color: var(--ink);
-}
-
 </style>
