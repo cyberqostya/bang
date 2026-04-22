@@ -72,11 +72,35 @@ export function useGameTable(roomStore, emit) {
     }
 
     if (seat.isTargetable) {
+      if (roomStore.selectedCard?.targetTableCardMode) {
+        emit("inspectPlayer", seat.player.playerId);
+        return;
+      }
+
       roomStore.useSelectedCard(seat.player.playerId);
+      return;
+    }
+
+    if (seat.player) {
+      emit("inspectPlayer", seat.player.playerId);
     }
   }
 
   function isTargetInSelectedCardRange(seat) {
+    if (roomStore.selectedCard?.targetTableCardMode) {
+      if (!roomStore.selectedCard.panicDistance) return true;
+
+      const distance = getPlayerDistance(
+        roomStore.room.seats,
+        roomStore.playerId,
+        seat.player.playerId,
+      );
+
+      return (
+        distance > 0 && distance <= roomStore.selectedCard.panicDistance
+      );
+    }
+
     if (!roomStore.selectedCard?.usesWeaponRange) return true;
 
     const distance = getPlayerDistance(

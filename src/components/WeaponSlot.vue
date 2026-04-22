@@ -5,9 +5,35 @@ import CardPreview from "./CardPreview.vue";
 import GameCardButton from "./GameCardButton.vue";
 import { useRoomStore } from "../stores/roomStore.js";
 
+const props = defineProps({
+  attackRange: {
+    type: Number,
+    default: undefined,
+  },
+  canActivate: {
+    type: Boolean,
+    default: undefined,
+  },
+  isAttention: {
+    type: Boolean,
+    default: undefined,
+  },
+  weapon: {
+    type: Object,
+    default: undefined,
+  },
+});
+
+const emit = defineEmits(["activate"]);
 const roomStore = useRoomStore();
-const weapon = computed(() => roomStore.ownPlayer?.weapon || null);
-const attackRange = computed(() => roomStore.ownPlayer?.attackRange || 1);
+const weapon = computed(() =>
+  props.weapon === undefined ? roomStore.ownPlayer?.weapon || null : props.weapon,
+);
+const attackRange = computed(() =>
+  props.attackRange === undefined
+    ? roomStore.ownPlayer?.attackRange || 1
+    : props.attackRange || 1,
+);
 const pendingReaction = computed(
   () => roomStore.room.game?.pendingReaction || null,
 );
@@ -16,11 +42,14 @@ const isPreviewOpen = ref(false);
 const { freezeLeavingCard } = useCardLeaveAnimation();
 const canActivateWeaponProperty = computed(
   () =>
-    Boolean(weapon.value?.propertyAction) &&
-    roomStore.isMyTurn &&
-    !isReactionActive.value,
+    props.canActivate ??
+    (Boolean(weapon.value?.propertyAction) &&
+      roomStore.isMyTurn &&
+      !isReactionActive.value),
 );
 const isWeaponPropertyActive = computed(() => {
+  if (props.isAttention !== undefined) return props.isAttention;
+
   const effectLimitKey = weapon.value?.propertyEffectLimitKey;
 
   if (!effectLimitKey) return false;
@@ -29,7 +58,11 @@ const isWeaponPropertyActive = computed(() => {
 });
 
 function handleWeaponTap() {
-  if (canActivateWeaponProperty.value) {
+  if (!canActivateWeaponProperty.value) return;
+
+  emit("activate", weapon.value);
+
+  if (props.canActivate === undefined) {
     roomStore.activateWeaponProperty();
   }
 }

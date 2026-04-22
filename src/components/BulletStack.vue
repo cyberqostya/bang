@@ -10,6 +10,13 @@ import {
 import { healthConfig } from "../config/healthConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
+const props = defineProps({
+  player: {
+    type: Object,
+    default: undefined,
+  },
+});
+
 const roomStore = useRoomStore();
 const bulletsElement = ref(null);
 const bulletWidth = ref(0);
@@ -22,14 +29,18 @@ const fallbackPlayer = {
   bulletSkinIndex: 0,
 };
 
-const ownPlayer = computed(() => roomStore.ownPlayer || fallbackPlayer);
+const displayPlayer = computed(() =>
+  props.player === undefined
+    ? roomStore.ownPlayer || fallbackPlayer
+    : props.player || fallbackPlayer,
+);
 const bulletImage = computed(() =>
-  getBulletImage(ownPlayer.value.bulletSkinIndex),
+  getBulletImage(displayPlayer.value.bulletSkinIndex),
 );
 const bullets = computed(() =>
-  Array.from({ length: ownPlayer.value.maxHealth }, (_, index) => ({
+  Array.from({ length: displayPlayer.value.maxHealth }, (_, index) => ({
     id: index,
-    isLoaded: index < ownPlayer.value.health,
+    isLoaded: index < displayPlayer.value.health,
   })),
 );
 const bulletOverlap = computed(() => {
@@ -73,7 +84,7 @@ watch(
 );
 
 function getBulletImage(index) {
-  if (ownPlayer.value.bulletSkinKey === "sheriff") {
+  if (displayPlayer.value.bulletSkinKey === "sheriff") {
     return healthConfig.sheriffBulletImage;
   }
 

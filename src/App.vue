@@ -27,6 +27,7 @@ const shouldReturnFromCardsToGame = computed(
     roomStore.screen === "game" &&
     (roomStore.isMyTurn ||
       roomStore.isDiscardingCards ||
+      roomStore.room.game?.generalStore ||
       roomStore.hasOwnTurnCheck ||
       isOwnReactionTarget.value),
 );

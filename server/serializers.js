@@ -31,7 +31,8 @@ export function createPublicStateSerializer(dependencies) {
       turnPlayerId: room.game.turnPlayerId,
       turnDrawTaken: room.game.turnDrawTaken,
       turnActionTaken: room.game.turnActionTaken,
-      pendingReaction: room.game.pendingReaction,
+      pendingReaction: getPublicPendingReaction(room),
+      generalStore: getPublicGeneralStore(room),
       turnCheck: room.game.turnCheck,
       winner: room.game.winner,
       winnerText: room.game.winnerText,
@@ -39,6 +40,30 @@ export function createPublicStateSerializer(dependencies) {
       events: room.game.events,
       deckCount: room.game.deck.length,
       discardCount: room.game.discard.length,
+    };
+  }
+
+  function getPublicPendingReaction(room) {
+    const pendingReaction = room.game.pendingReaction;
+
+    if (!pendingReaction) return null;
+
+    return {
+      ...pendingReaction,
+      remainingMs: Math.max(0, pendingReaction.expiresAt - Date.now()),
+    };
+  }
+
+  function getPublicGeneralStore(room) {
+    const generalStore = room.game.generalStore;
+
+    if (!generalStore) return null;
+
+    return {
+      ...generalStore,
+      cards: generalStore.cards.map((card) =>
+        getPublicCard(room, null, card, { includePlayState: false }),
+      ),
     };
   }
 
@@ -108,6 +133,8 @@ export function createPublicStateSerializer(dependencies) {
       selectionView: configForCard.selectionView,
       needsTarget: isReactionPlayable ? false : configForCard.needsTarget,
       usesWeaponRange: configForCard.usesWeaponRange,
+      panicDistance: configForCard.panicDistance,
+      targetTableCardMode: configForCard.targetTableCardMode,
       disposable: configForCard.disposable,
       effectLimitKey: configForCard.effectLimitKey,
       propertyAction: configForCard.propertyAction,

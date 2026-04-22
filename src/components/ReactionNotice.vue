@@ -1,7 +1,8 @@
 <script setup>
+import { computed } from "vue";
 import GameEventMessage from "./GameEventMessage.vue";
 
-defineProps({
+const props = defineProps({
   mode: {
     type: String,
     default: "reaction",
@@ -47,35 +48,41 @@ defineProps({
     default: null,
   },
 });
+
+const isCheckMode = computed(() => props.mode === "check");
+const isGeneralStoreMode = computed(() => props.mode === "general-store");
+const progressStyle = computed(() =>
+  isCheckMode.value ? props.checkProgressStyle : props.reactionProgressStyle,
+);
+const shouldShowCount = computed(() => !isCheckMode.value);
+const noticeClass = computed(() => ({
+  "reaction-notice_general-store": isGeneralStoreMode.value,
+}));
+const shouldShowReactionHint = computed(
+  () =>
+    !isCheckMode.value && !isGeneralStoreMode.value && props.isReactionTarget,
+);
+const shouldShowBarrelCheckFailure = computed(
+  () => shouldShowReactionHint.value && props.barrelCheckFailure,
+);
 </script>
 
 <template>
-  <section
-    v-if="mode === 'check'"
-    class="reaction-notice reaction-notice_check"
-    aria-live="assertive"
-  >
-    <span
-      class="reaction-notice__progress reaction-notice__progress_check"
-      :style="checkProgressStyle"
-    ></span>
+  <section class="reaction-notice" :class="noticeClass" aria-live="assertive">
+    <span class="reaction-notice__progress" :style="progressStyle"></span>
     <div class="reaction-notice__copy">
-      <p class="reaction-notice__subtext reaction-notice__check-text">
-        <GameEventMessage
-          :event="turnCheckNotice"
-          tone="light"
-        />
+      <p
+        v-if="isCheckMode"
+        class="reaction-notice__subtext reaction-notice__check-text"
+      >
+        <GameEventMessage :event="turnCheckNotice" />
       </p>
-    </div>
-  </section>
 
-  <section v-else class="reaction-notice" aria-live="assertive">
-    <span
-      class="reaction-notice__progress"
-      :style="reactionProgressStyle"
-    ></span>
-    <div class="reaction-notice__copy">
-      <p class="reaction-notice__text">
+      <p v-else-if="isGeneralStoreMode" class="reaction-notice__text">
+        {{ reactionActorPrompt }}
+      </p>
+
+      <p v-else class="reaction-notice__text">
         <template v-if="isReactionTarget">
           <span>Вы стали целью </span>
           <span
@@ -95,11 +102,13 @@ defineProps({
           </span>
         </template>
       </p>
-      <template v-if="isReactionTarget">
-        <p class="reaction-notice__subtext">До потери здоровья осталось -></p>
-      </template>
+
+      <p v-if="shouldShowReactionHint" class="reaction-notice__subtext">
+        До потери здоровья осталось ->
+      </p>
+
       <p
-        v-if="isReactionTarget && barrelCheckFailure"
+        v-if="shouldShowBarrelCheckFailure"
         class="reaction-notice__subtext reaction-notice__check-text"
       >
         <span>проверка {{ barrelCheckFailure.checkCardTitle }}</span>
@@ -129,7 +138,7 @@ defineProps({
         </span>
       </p>
     </div>
-    <span class="reaction-notice__count">
+    <span v-if="shouldShowCount" class="reaction-notice__count">
       {{ reactionCountdown }}
     </span>
   </section>
@@ -149,23 +158,15 @@ defineProps({
   overflow: hidden;
   border-radius: 8px;
   padding: 14px;
-  background: var(--ink);
+  background: var(--back-soft);
   box-shadow:
-    0 16px 32px rgba(29, 29, 29, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  color: #fff;
-  align-items: flex-start;
+    0 16px 32px rgba(29, 29, 29, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  color: var(--ink);
 }
 
-.reaction-notice_check {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.reaction-notice_check :deep(.game-event-message__check-drawn) {
-  border-radius: 6px;
-  padding: 5px;
-  background: rgba(255, 255, 255, 0.94);
-  text-shadow: none;
+.reaction-notice_general-store {
+  align-items: center;
 }
 
 .reaction-notice__progress {
@@ -174,7 +175,7 @@ defineProps({
   right: 0;
   top: 0;
   height: 5px;
-  background: var(--gold);
+  background: var(--ink);
   transform-origin: left center;
   transition: transform 220ms linear;
   will-change: transform;
@@ -184,17 +185,15 @@ defineProps({
   position: relative;
   z-index: 1;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .reaction-notice__text {
   margin: 0;
-  color: #fff;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   line-height: 1.1;
   text-wrap: balance;
-  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
 }
 
 .reaction-notice__card {
@@ -208,12 +207,11 @@ defineProps({
   font-weight: 500;
   line-height: 1;
   text-wrap: balance;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
 }
 
 .reaction-notice__check-text {
-  color: #fff;
   line-height: 1.3;
+  margin-block: 0.5em;
 }
 
 .reaction-notice__check-card {
@@ -221,10 +219,6 @@ defineProps({
   align-items: center;
   gap: 2px;
   vertical-align: baseline;
-  border-radius: 6px;
-  padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.94);
-  text-shadow: none;
 }
 
 .reaction-notice__check-rank {
@@ -239,12 +233,10 @@ defineProps({
 
 .reaction-notice__count {
   min-width: 1.2ch;
-  color: #fff;
   font-size: 48px;
   font-weight: 800;
   line-height: 1;
   text-align: right;
-  text-shadow: 0 3px 12px rgba(0, 0, 0, 0.34);
 }
 
 .reaction-notice-enter-active {

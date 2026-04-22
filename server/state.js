@@ -14,6 +14,7 @@ export function createRoomState(options) {
     gameExpirationTimer: null,
     finishedRoomTimer: null,
     pendingReactionTimer: null,
+    generalStoreTimer: null,
   };
 }
 
@@ -56,6 +57,7 @@ export function createEmptyGameState() {
     deck: [],
     discard: [],
     pendingReaction: null,
+    generalStore: null,
     turnPlayedEffects: {},
     turnEffectAllowances: {},
     turnDrawTaken: false,

@@ -102,9 +102,13 @@ const missedCards = [
 const beerCards = ["8h", "Jh", "6h", "10h", "9h", "7h"];
 const gatlingCards = ["10h"];
 const indiansCards = ["Ad", "Kd"];
+const duelCards = ["Js", "8c", "Qd"];
+const panicCards = ["8d", "Qh", "Ah", "Jh"];
+const catbalouCards = ["Jd", "9d", "10d", "Kh"];
 const saloonCards = ["5h"];
 const stagecoachCards = ["9s", "9s"];
 const wellsFargoCards = ["3h"];
+const generalStoreCards = ["Qs", "9c"];
 
 const weaponCards = [
   ["remington", "Kc"],
@@ -146,6 +150,15 @@ export function createDeck() {
     ...indiansCards.map((cardCode, index) =>
       createDeckCard("indians", cardCode, index),
     ),
+    ...duelCards.map((cardCode, index) =>
+      createDeckCard("duel", cardCode, index),
+    ),
+    ...panicCards.map((cardCode, index) =>
+      createDeckCard("panic", cardCode, index),
+    ),
+    ...catbalouCards.map((cardCode, index) =>
+      createDeckCard("catbalou", cardCode, index),
+    ),
     ...saloonCards.map((cardCode, index) =>
       createDeckCard("saloon", cardCode, index),
     ),
@@ -154,6 +167,9 @@ export function createDeck() {
     ),
     ...wellsFargoCards.map((cardCode, index) =>
       createDeckCard("wellsfargo", cardCode, index),
+    ),
+    ...generalStoreCards.map((cardCode, index) =>
+      createDeckCard("generalstore", cardCode, index),
     ),
     ...weaponCards.map(([cardId, cardCode], index) =>
       createDeckCard(cardId, cardCode, index),

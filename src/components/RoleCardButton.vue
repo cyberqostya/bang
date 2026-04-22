@@ -3,12 +3,45 @@ import { computed, ref } from "vue";
 import { roleBackImage, roleConfig } from "../config/roleConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
+const props = defineProps({
+  canOpen: {
+    type: Boolean,
+    default: true,
+  },
+  isFaceUp: {
+    type: Boolean,
+    default: undefined,
+  },
+  role: {
+    type: Object,
+    default: undefined,
+  },
+});
+
 const roomStore = useRoomStore();
 const isOpen = ref(false);
-const role = computed(() => roleConfig[roomStore.ownPlayer?.role?.id] || null);
+const role = computed(() => {
+  const sourceRole =
+    props.role === undefined ? roomStore.ownPlayer?.role || null : props.role;
 
-function openRole() {
-  if (!role.value) return;
+  return roleConfig[sourceRole?.id] || sourceRole || null;
+});
+const isRoleFaceUp = computed(
+  () =>
+    props.isFaceUp ??
+    Boolean(
+      role.value &&
+      (role.value.id === "sheriff" ||
+        roomStore.ownPlayer?.isRoleRevealed ||
+        roomStore.ownPlayer?.isAlive === false),
+    ),
+);
+const roleImage = computed(() =>
+  isRoleFaceUp.value && role.value ? role.value.image : roleBackImage,
+);
+
+function openRole(canOpen) {
+  if (!role.value || !canOpen) return;
 
   isOpen.value = true;
 }
@@ -22,11 +55,12 @@ function closeRole() {
   <button
     class="role-card-button"
     type="button"
+    :aria-disabled="!canOpen"
     :disabled="!role"
     aria-label="Посмотреть роль"
-    @click.stop="openRole"
+    @click.stop="openRole(canOpen)"
   >
-    <img :src="roleBackImage" alt="" />
+    <img :src="roleImage" alt="" />
   </button>
 
   <div
@@ -42,7 +76,11 @@ function closeRole() {
     >
       <span class="role-card-preview__inner">
         <img class="role-card-preview__back" :src="roleBackImage" alt="" />
-        <img class="role-card-preview__front" :src="role?.image" :alt="role?.label" />
+        <img
+          class="role-card-preview__front"
+          :src="role?.image"
+          :alt="role?.label"
+        />
       </span>
     </button>
   </div>
@@ -57,8 +95,8 @@ function closeRole() {
   box-shadow: 0 8px 18px rgba(94, 84, 70, 0.14);
 }
 
-.role-card-button:disabled {
-  opacity: 0.42;
+.role-card-button[aria-disabled="true"] {
+  cursor: default;
 }
 
 .role-card-button img {
@@ -104,4 +142,3 @@ function closeRole() {
   }
 }
 </style>
-

@@ -8,20 +8,22 @@ import BottomPanel from "../components/BottomPanel.vue";
 import BlueCardsSlot from "../components/BlueCardsSlot.vue";
 import BulletStack from "../components/BulletStack.vue";
 import CardPreview from "../components/CardPreview.vue";
-import CharacterSlot from "../components/CharacterSlot.vue";
 import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
 import GameCardButton from "../components/GameCardButton.vue";
+import GeneralStoreDialog from "../components/GeneralStoreDialog.vue";
+import PlayerCardsView from "../components/PlayerCardsView.vue";
+import PlayerTableZone from "../components/PlayerTableZone.vue";
 import ReactionNotice from "../components/ReactionNotice.vue";
-import RoleCardButton from "../components/RoleCardButton.vue";
-import WeaponSlot from "../components/WeaponSlot.vue";
 import { useGameResult } from "../composables/useGameResult.js";
 import { useReactionNotice } from "../composables/useReactionNotice.js";
 import { useRoomStore } from "../stores/roomStore.js";
 import { navigateTo } from "../utils/navigation.js";
+import { timingConfig } from "../../shared/timingConfig.js";
 
 const roomStore = useRoomStore();
 const viewMode = ref("cards");
+const inspectedPlayerId = ref("");
 const eventFeedElement = ref(null);
 const selectedActionPreviewCard = ref(null);
 const isApplyingCardOnPlayers = ref(false);
@@ -35,8 +37,10 @@ const wasDiscardingCards = ref(false);
 const wasReactionParticipant = ref(false);
 const lastShownTurnCheckEventId = ref("");
 const reactionNow = ref(Date.now());
+const reactionDeadlineAt = ref(0);
 const finishDelayLeft = ref(0);
 let reactionCountdownTimer = null;
+let generalStoreCountdownTimer = null;
 let turnCheckNoticeTimer = null;
 let turnCheckProgressTimer = null;
 const gameEvents = computed(() => roomStore.room.game?.events || []);
@@ -52,7 +56,7 @@ const {
   reactionNoticeColor,
   reactionProgressStyle,
   shouldShowReactionOverlay,
-} = useReactionNotice(roomStore, reactionNow);
+} = useReactionNotice(roomStore, reactionNow, reactionDeadlineAt);
 const shouldShowTurnCheckNotice = computed(
   () => Boolean(turnCheckNotice.value) && !shouldShowReactionOverlay.value,
 );
@@ -65,7 +69,9 @@ const turnCheckProgressStyle = computed(() => {
     0,
     Math.min(
       1,
-      1 - (reactionNow.value - turnCheckNoticeStartedAt.value) / 5000,
+      1 -
+        (reactionNow.value - turnCheckNoticeStartedAt.value) /
+          timingConfig.turnCheckNoticeMs,
     ),
   );
 
@@ -82,6 +88,74 @@ const turnNoticePlayerLabel = computed(() => {
 });
 const currentTurnPlayerId = computed(
   () => roomStore.room.game?.turnPlayerId || "",
+);
+const inspectedPlayer = computed(
+  () =>
+    roomStore.players.find(
+      (player) => player.playerId === inspectedPlayerId.value,
+    ) || null,
+);
+const isInspectingOpponent = computed(
+  () =>
+    Boolean(inspectedPlayer.value) &&
+    inspectedPlayer.value.playerId !== roomStore.playerId,
+);
+const inspectedPlayerLabel = computed(() => {
+  const player = inspectedPlayer.value;
+
+  if (!player) return "";
+
+  return player.role?.id === "sheriff" ? `Шериф ${player.name}` : player.name;
+});
+const canTakeInspectedCards = computed(
+  () =>
+    isInspectingOpponent.value &&
+    Boolean(roomStore.selectedCard?.targetTableCardMode) &&
+    roomStore.selectedCard?.isPlayable,
+);
+const generalStore = computed(() => roomStore.room.game?.generalStore || null);
+const generalStoreCurrentPicker = computed(
+  () => generalStore.value?.pickOrder?.[generalStore.value.pickerIndex] || null,
+);
+const isGeneralStoreCurrentPicker = computed(
+  () => generalStoreCurrentPicker.value?.playerId === roomStore.playerId,
+);
+const generalStoreCurrentPickerLabel = computed(() => {
+  const picker = generalStoreCurrentPicker.value;
+
+  if (!picker) return "";
+
+  return picker.roleId === "sheriff" ? `Шериф ${picker.name}` : picker.name;
+});
+const generalStoreCountdown = computed(() => {
+  if (!generalStore.value?.expiresAt) return 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      Math.ceil(timingConfig.generalStorePickWindowMs / 1000),
+      Math.ceil((generalStore.value.expiresAt - reactionNow.value) / 1000),
+    ),
+  );
+});
+const generalStoreProgressStyle = computed(() => {
+  if (!generalStore.value?.expiresAt) return { transform: "scaleX(0)" };
+
+  const ratio = Math.max(
+    0,
+    Math.min(
+      1,
+      (generalStore.value.expiresAt - reactionNow.value) /
+        timingConfig.generalStorePickWindowMs,
+    ),
+  );
+
+  return { transform: `scaleX(${ratio})` };
+});
+const generalStoreNoticeText = computed(() =>
+  isGeneralStoreCurrentPicker.value
+    ? "Выбери карту"
+    : `Выбирает ${generalStoreCurrentPickerLabel.value}`,
 );
 const canFinishGameRoom = computed(
   () => Boolean(roomStore.room.game?.winnerText) && finishDelayLeft.value === 0,
@@ -167,6 +241,7 @@ watch(
 
     if (!selectedCard && isApplyingCardOnPlayers.value) {
       isApplyingCardOnPlayers.value = false;
+      inspectedPlayerId.value = "";
     }
   },
 );
@@ -224,6 +299,8 @@ watch(
   () =>
     [
       pendingReaction.value?.id || "",
+      pendingReaction.value?.actorPlayerId || "",
+      pendingReaction.value?.targetPlayerId || "",
       ...(pendingReaction.value?.targetPlayerIds || []),
     ].join(":"),
   (reactionKey, previousReactionKey) => {
@@ -231,6 +308,8 @@ watch(
     reactionCountdownTimer = null;
 
     if (!reactionKey) {
+      reactionDeadlineAt.value = 0;
+
       if (previousReactionKey && wasReactionParticipant.value) {
         viewMode.value = "players";
       }
@@ -239,6 +318,12 @@ watch(
     }
 
     reactionNow.value = Date.now();
+    reactionDeadlineAt.value =
+      reactionNow.value +
+      Math.min(
+        timingConfig.reactionWindowMs,
+        Math.max(0, pendingReaction.value?.remainingMs ?? timingConfig.reactionWindowMs),
+      );
     const wasParticipant = wasReactionParticipant.value;
 
     wasReactionParticipant.value =
@@ -247,6 +332,11 @@ watch(
     if (isReactionTarget.value) {
       viewMode.value = "cards";
       roomStore.cancelSelectedCard();
+    } else if (
+      isReactionActor.value &&
+      ["gatling", "indians"].includes(pendingReaction.value?.sourceAction)
+    ) {
+      viewMode.value = "players";
     } else if (wasParticipant && !isReactionActor.value) {
       viewMode.value = "players";
     }
@@ -255,6 +345,25 @@ watch(
       reactionNow.value = Date.now();
     }, 200);
   },
+  { immediate: true },
+);
+
+watch(
+  () => generalStore.value?.id || "",
+  (generalStoreId) => {
+    window.clearInterval(generalStoreCountdownTimer);
+    generalStoreCountdownTimer = null;
+
+    if (!generalStoreId) return;
+
+    roomStore.cancelSelectedCard();
+    selectedActionPreviewCard.value = null;
+    reactionNow.value = Date.now();
+    generalStoreCountdownTimer = window.setInterval(() => {
+      reactionNow.value = Date.now();
+    }, 200);
+  },
+  { immediate: true },
 );
 
 watch(isReactionTarget, (isTarget) => {
@@ -277,6 +386,7 @@ watch(
 
 onBeforeUnmount(() => {
   window.clearInterval(reactionCountdownTimer);
+  window.clearInterval(generalStoreCountdownTimer);
   window.clearInterval(turnCheckProgressTimer);
   window.clearTimeout(turnCheckNoticeTimer);
 });
@@ -288,7 +398,13 @@ function toggleViewMode() {
     roomStore.cancelSelectedCard();
   }
 
-  viewMode.value = viewMode.value === "cards" ? "players" : "cards";
+  if (viewMode.value === "cards") {
+    viewMode.value = "players";
+    return;
+  }
+
+  inspectedPlayerId.value = "";
+  viewMode.value = "cards";
 }
 
 function showCardsView() {
@@ -298,6 +414,12 @@ function showCardsView() {
     roomStore.cancelSelectedCard();
   }
 
+  inspectedPlayerId.value = "";
+  viewMode.value = "cards";
+}
+
+function inspectPlayerCards(playerId) {
+  inspectedPlayerId.value = playerId;
   viewMode.value = "cards";
 }
 
@@ -338,7 +460,10 @@ function showOwnTurnCheckNotice() {
   turnCheckProgressTimer = window.setInterval(() => {
     reactionNow.value = Date.now();
   }, 200);
-  turnCheckNoticeTimer = window.setTimeout(clearTurnCheckNotice, 5000);
+  turnCheckNoticeTimer = window.setTimeout(
+    clearTurnCheckNotice,
+    timingConfig.turnCheckNoticeMs,
+  );
 }
 
 function clearTurnCheckNotice() {
@@ -422,7 +547,9 @@ function handleDrawPhase() {
 }
 
 function handleSelectedActionClick() {
+  inspectedPlayerId.value = "";
   roomStore.cancelSelectedCard();
+  viewMode.value = "cards";
 }
 
 function openSelectedActionPreview(card) {
@@ -437,6 +564,20 @@ function openCardKnowledge(cardId) {
   if (!cardId) return;
 
   navigateTo(`/cards?card=${encodeURIComponent(cardId)}`);
+}
+
+function takeInspectedCard(targetCard) {
+  if (!canTakeInspectedCards.value || !inspectedPlayer.value) return;
+
+  roomStore.useTargetTableCard(inspectedPlayer.value.playerId, targetCard);
+  inspectedPlayerId.value = "";
+  viewMode.value = "players";
+}
+
+function chooseGeneralStoreCard(cardInstanceId) {
+  if (!isGeneralStoreCurrentPicker.value) return;
+
+  roomStore.chooseGeneralStoreCard(cardInstanceId);
 }
 </script>
 
@@ -488,7 +629,10 @@ function openCardKnowledge(cardId) {
           </p>
         </div>
       </PlayZone>
-      <GamePlayersTable @show-cards="showCardsView" />
+      <GamePlayersTable
+        @inspect-player="inspectPlayerCards"
+        @show-cards="showCardsView"
+      />
       <GameCardButton
         v-if="roomStore.selectedCard?.selectionView === 'players'"
         class="selected-action-card"
@@ -501,13 +645,20 @@ function openCardKnowledge(cardId) {
       />
     </section>
 
-    <section
-      v-else
-      class="cards-view"
-      :class="{ 'cards-view_with-phases': roomStore.room.status === 'game' }"
-    >
+    <section v-else class="cards-view">
+      <div v-if="isInspectingOpponent" class="inspected-player-heading">
+        {{ inspectedPlayerLabel }}
+      </div>
+
+      <PlayerCardsView
+        v-if="isInspectingOpponent"
+        :can-take-cards="canTakeInspectedCards"
+        :player="inspectedPlayer"
+        @take-card="takeInspectedCard"
+      />
+
       <PlayZone
-        v-if="roomStore.room.status === 'game'"
+        v-if="!isInspectingOpponent && roomStore.room.status === 'game'"
         title="Фазы хода"
         variant="phases"
         :class="{ 'turn-phases-zone_active': roomStore.isMyTurn }"
@@ -547,26 +698,29 @@ function openCardKnowledge(cardId) {
         </div>
       </PlayZone>
 
-      <div
-        v-if="roomStore.room.status === 'game'"
-        class="cards-view__future-space"
-        aria-hidden="true"
-      ></div>
-
-      <PlayZone title="Планшет игрока" variant="table">
-        <div class="table-main">
+      <PlayerTableZone v-if="!isInspectingOpponent">
+        <template #lead>
           <BulletStack />
-          <div class="table-cards">
-            <CharacterSlot />
-            <WeaponSlot />
-            <RoleCardButton />
-          </div>
-        </div>
-      </PlayZone>
+        </template>
+      </PlayerTableZone>
 
-      <BlueCardsSlot />
+      <BlueCardsSlot v-if="!isInspectingOpponent" />
 
-      <BottomPanel />
+      <BottomPanel v-if="!isInspectingOpponent" />
+
+      <GameCardButton
+        v-if="
+          isInspectingOpponent &&
+          roomStore.selectedCard?.selectionView === 'players'
+        "
+        class="selected-action-card"
+        :card="roomStore.selectedCard"
+        :aria-label="`Отменить ${roomStore.selectedCard.title}`"
+        is-floating
+        mark="cancel"
+        @activate="handleSelectedActionClick"
+        @preview="openSelectedActionPreview"
+      />
     </section>
 
     <div
@@ -630,9 +784,27 @@ function openCardKnowledge(cardId) {
       </form>
     </div>
 
+    <GeneralStoreDialog
+      v-if="generalStore"
+      :cards="generalStore.cards"
+      :is-current-picker="isGeneralStoreCurrentPicker"
+      @choose="chooseGeneralStoreCard"
+    />
+
     <Transition name="reaction-notice">
       <ReactionNotice
+        v-if="generalStore"
+        mode="general-store"
+        :reaction-actor-prompt="generalStoreNoticeText"
+        :reaction-countdown="generalStoreCountdown"
+        :reaction-progress-style="generalStoreProgressStyle"
+      />
+    </Transition>
+
+    <Transition name="reaction-notice" mode="out-in">
+      <ReactionNotice
         v-if="shouldShowReactionOverlay"
+        :key="pendingReaction?.id"
         :barrel-check-failure="barrelCheckFailure"
         :is-reaction-target="isReactionTarget"
         :pending-reaction="pendingReaction"
@@ -696,12 +868,27 @@ function openCardKnowledge(cardId) {
 
 <style scoped>
 .cards-view {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
-.cards-view_with-phases {
-  grid-template-rows: auto minmax(24px, 1fr) auto auto auto;
+.cards-view :deep(.play-zone_table) {
+  margin-top: auto;
+}
+
+.inspected-player-heading {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  min-height: 53px;
+  border-bottom: 1px dashed var(--line);
+  color: var(--ink);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
 }
 
 .players-view {
@@ -764,27 +951,6 @@ function openCardKnowledge(cardId) {
   color: var(--muted);
   white-space: nowrap;
   font-size: 12px;
-}
-
-.cards-view__future-space {
-  min-width: 0;
-  min-height: 24px;
-}
-
-.table-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 15px 5px;
-}
-
-.table-cards {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
 }
 
 .turn-phases {

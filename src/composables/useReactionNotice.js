@@ -1,8 +1,9 @@
 import { computed } from "vue";
+import { timingConfig } from "../../shared/timingConfig.js";
 
-const REACTION_WINDOW_MS = 5 * 1000;
+const REACTION_WINDOW_MS = timingConfig.reactionWindowMs;
 
-export function useReactionNotice(roomStore, reactionNow) {
+export function useReactionNotice(roomStore, reactionNow, reactionDeadlineAt) {
   const pendingReaction = computed(
     () => roomStore.room.game?.pendingReaction || null,
   );
@@ -32,22 +33,24 @@ export function useReactionNotice(roomStore, reactionNow) {
       } на`,
   );
   const reactionCountdown = computed(() => {
-    if (!pendingReaction.value?.expiresAt) return 0;
+    if (!reactionDeadlineAt.value) return 0;
 
-    return Math.max(
-      0,
-      Math.ceil((pendingReaction.value.expiresAt - reactionNow.value) / 1000),
+    const timeLeft = reactionDeadlineAt.value - reactionNow.value;
+    const displaySeconds = Math.round(timeLeft / 1000);
+
+    return Math.min(
+      Math.ceil(REACTION_WINDOW_MS / 1000),
+      Math.max(0, displaySeconds),
     );
   });
   const reactionTimeLeftRatio = computed(() => {
-    if (!pendingReaction.value?.expiresAt) return 0;
+    if (!reactionDeadlineAt.value) return 0;
 
     return Math.max(
       0,
       Math.min(
         1,
-        (pendingReaction.value.expiresAt - reactionNow.value) /
-          REACTION_WINDOW_MS,
+        (reactionDeadlineAt.value - reactionNow.value) / REACTION_WINDOW_MS,
       ),
     );
   });

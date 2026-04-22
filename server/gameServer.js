@@ -43,8 +43,12 @@ export function startGameServer() {
     bang: playBangCard,
     gatling: playGatlingCard,
     indians: playIndiansCard,
+    duel: playDuelCard,
+    panic: playTargetTableCard,
+    catbalou: playTargetTableCard,
     beer: playBeerCard,
     saloon: playSaloonCard,
+    generalstore: playGeneralStoreCard,
     drawCards: playDrawCardsCard,
     equipWeapon: playEquipWeaponCard,
     playBlueCard: playBlueCardFromHand,
@@ -544,6 +548,16 @@ export function startGameServer() {
       return;
     }
 
+    if (room.game.generalStore) {
+      if (payload.action === "chooseGeneralStoreCard") {
+        chooseGeneralStoreCard(client, room, payload);
+        return;
+      }
+
+      sendError(client.socket, "Сначала выберите карту из магазина");
+      return;
+    }
+
     if (payload.action === "checkTurnBlueCard") {
       checkTurnBlueCard(client, room, payload);
       return;
@@ -860,6 +874,80 @@ export function startGameServer() {
     return playMultiTargetAttackCard(context, "indians");
   }
 
+  function playDuelCard(context) {
+    const { client, room, payload, actor, card, configForCard } = context;
+    const result = applyDirectTargetAction(client, room, payload);
+
+    if (!result) return false;
+
+    addGameEvent(room, {
+      type: "card",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      cardId: card.cardId,
+      cardTitle: getCardEventTitle(card),
+      cardColor: configForCard.eventColor,
+      targetName: result.targetPlayer.name,
+      targetRoleId: result.targetPlayer.roleId,
+    });
+    markTurnActionTaken(room);
+    startPendingReaction(room, {
+      sourceAction: "duel",
+      actorPlayerId: actor.playerId,
+      actorName: actor.name,
+      targetPlayerId: result.targetPlayer.playerId,
+      targetName: result.targetPlayer.name,
+      healthLoss: result.healthLoss,
+      cardTitle: getCardEventTitle(card),
+      cardColor: configForCard.eventColor,
+    });
+
+    return {};
+  }
+
+  function playTargetTableCard(context) {
+    const { client, room, payload, actor, card, cardIndex, configForCard } =
+      context;
+    const result = takeTargetTableCard(
+      client,
+      room,
+      actor,
+      configForCard,
+      payload,
+    );
+
+    if (!result) return false;
+
+    const [playedCard] = actor.hand.splice(cardIndex, 1);
+    const mode = configForCard.targetTableCardMode || "take";
+
+    room.game.discard.push(playedCard);
+
+    if (mode === "take") {
+      actor.hand.unshift(result.targetCard);
+    } else {
+      room.game.discard.push(result.targetCard);
+    }
+
+    markTurnActionTaken(room);
+    addGameEvent(room, {
+      type: "targetTableCard",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      cardId: card.cardId,
+      cardTitle: getCardEventTitle(card),
+      cardColor: configForCard.eventColor,
+      targetName: result.targetPlayer.name,
+      targetRoleId: result.targetPlayer.roleId,
+      affectedCardId: result.targetCard.cardId,
+      affectedCardTitle: getCardEventTitle(result.targetCard),
+      affectedCardColor: getCardEventColor(result.targetCard),
+    });
+    broadcastRoom(room.id);
+
+    return { completed: true };
+  }
+
   function playMultiTargetAttackCard(context, sourceAction) {
     const { client, room, actor, card, configForCard } = context;
     const result = applyGatlingAction(client, room);
@@ -918,6 +1006,33 @@ export function startGameServer() {
     markTurnActionTaken(room);
     addCardDrawEvent(room, actor, card, configForCard);
     broadcastRoom(room.id);
+    return { completed: true };
+  }
+
+  function playGeneralStoreCard(context) {
+    const { client, room, actor, card, cardIndex, configForCard } = context;
+    const alivePlayers = getAlivePlayersInTurnOrder(room, actor.playerId);
+
+    if (alivePlayers.length === 0) {
+      sendError(client.socket, "Некому выбирать карты");
+      return false;
+    }
+
+    const storeCards = drawCardsFromDeck(room, alivePlayers.length);
+
+    if (storeCards.length === 0) {
+      sendError(client.socket, "В колоде нет карт");
+      return false;
+    }
+
+    const [discardedCard] = actor.hand.splice(cardIndex, 1);
+
+    room.game.discard.push(discardedCard);
+    markTurnActionTaken(room);
+    addCardOnlyEvent(room, actor, card, configForCard);
+    startGeneralStore(room, alivePlayers, storeCards);
+    broadcastRoom(room.id);
+
     return { completed: true };
   }
 
@@ -1027,6 +1142,17 @@ export function startGameServer() {
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
       amount: configForCard.healAmount || 1,
+    });
+  }
+
+  function addLifeSavingBeerEvent(room, actor, card, configForCard) {
+    addGameEvent(room, {
+      type: "lifeSavingBeer",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      cardId: card.cardId,
+      cardTitle: "СПАСИТЕЛЬНОЕ ПИВО",
+      cardColor: configForCard.eventColor,
     });
   }
 
@@ -1201,6 +1327,120 @@ export function startGameServer() {
     return { targetPlayer, healthLoss };
   }
 
+  function applyDirectTargetAction(client, room, payload = {}) {
+    const targetPlayerId = normalizePlayerId(payload.targetPlayerId);
+
+    if (!targetPlayerId || targetPlayerId === client.playerId) {
+      sendError(client.socket, "Некорректная цель");
+      return false;
+    }
+
+    const targetSeatIndex = findSeatIndexByPlayerId(room, targetPlayerId);
+
+    if (targetSeatIndex === null) {
+      sendError(client.socket, "Игрок не найден");
+      return false;
+    }
+
+    const targetPlayer = room.seats[targetSeatIndex].player;
+
+    if (!targetPlayer.isAlive) {
+      sendError(client.socket, "Игрок уже выбыл");
+      return false;
+    }
+
+    return { targetPlayer, healthLoss: 1 };
+  }
+
+  function takeTargetTableCard(
+    client,
+    room,
+    actor,
+    configForCard,
+    payload = {},
+  ) {
+    const targetPlayerId = normalizePlayerId(payload.targetPlayerId);
+
+    if (!targetPlayerId || targetPlayerId === actor.playerId) {
+      sendError(client.socket, "Некорректная цель");
+      return false;
+    }
+
+    const targetSeatIndex = findSeatIndexByPlayerId(room, targetPlayerId);
+
+    if (targetSeatIndex === null) {
+      sendError(client.socket, "Игрок не найден");
+      return false;
+    }
+
+    const targetPlayer = room.seats[targetSeatIndex].player;
+
+    if (!targetPlayer.isAlive) {
+      sendError(client.socket, "Игрок уже выбыл");
+      return false;
+    }
+
+    if (configForCard.panicDistance) {
+      const distance = getPlayerDistance(room, actor.playerId, targetPlayerId);
+
+      if (!distance || distance > configForCard.panicDistance) {
+        sendError(client.socket, "Цель слишком далеко");
+        return false;
+      }
+    }
+
+    const targetCard = takeTargetCard(room, targetPlayer, payload);
+
+    if (!targetCard) {
+      sendError(client.socket, "Карту нельзя выбрать");
+      return false;
+    }
+
+    return { targetPlayer, targetCard };
+  }
+
+  function takeTargetCard(room, targetPlayer, payload = {}) {
+    if (payload.source === "weapon") {
+      const weapon = targetPlayer.weapon || null;
+
+      clearWeaponPropertyAllowances(room, targetPlayer);
+      targetPlayer.weapon = null;
+      targetPlayer.attackRange = config.defaultAttackRange;
+      return weapon;
+    }
+
+    if (payload.source === "blue") {
+      const cardIndex =
+        targetPlayer.blueCards?.findIndex(
+          (card) => card.instanceId === payload.targetCardInstanceId,
+        ) ?? -1;
+
+      if (cardIndex === -1) return null;
+
+      const [card] = targetPlayer.blueCards.splice(cardIndex, 1);
+
+      return card;
+    }
+
+    if (payload.source === "hand") {
+      const cardIndex = Number(payload.handIndex);
+
+      if (
+        !Number.isInteger(cardIndex) ||
+        cardIndex < 0 ||
+        cardIndex >= (targetPlayer.hand?.length || 0)
+      ) {
+        return null;
+      }
+
+      const [card] = targetPlayer.hand.splice(cardIndex, 1);
+
+      return card;
+    }
+
+    return null;
+  }
+
   function applyGatlingAction(client, room) {
     const targetPlayers = getAlivePlayers(room).filter(
       (player) => player.playerId !== client.playerId,
@@ -1255,7 +1495,10 @@ export function startGameServer() {
     targetPlayers
       .filter((targetPlayer) => targetPlayer.isAlive)
       .forEach((targetPlayer) => {
-        applyHealthLoss(room, targetPlayer, pendingReaction.healthLoss);
+        applyHealthLoss(room, targetPlayer, pendingReaction.healthLoss, {
+          reasonText:
+            pendingReaction.sourceAction === "duel" ? "проиграл дуэль" : "",
+        });
         revealDeadPlayer(room, targetPlayer, actor);
       });
 
@@ -1281,6 +1524,7 @@ export function startGameServer() {
       type: "healthLoss",
       playerName: player.name,
       playerRoleId: player.roleId,
+      reasonText: options.reasonText || "",
       amount,
     });
   }
@@ -1566,11 +1810,28 @@ export function startGameServer() {
 
     if (payload.action === "beer") {
       healPlayer(targetPlayer, configForCard.healAmount || 1);
-      addBeerEvent(room, targetPlayer, card, configForCard);
+      addLifeSavingBeerEvent(room, targetPlayer, card, configForCard);
       targetPlayer.health = Math.max(
         0,
         targetPlayer.health - pendingReaction.healthLoss,
       );
+    } else if (
+      payload.action === "bang" &&
+      ["duel", "indians"].includes(pendingReaction.sourceAction)
+    ) {
+      addGameEvent(room, {
+        type: "discard",
+        actorName: targetPlayer.name,
+        actorRoleId: targetPlayer.roleId,
+        cardId: card.cardId,
+        cardTitle: getCardEventTitle(card),
+        cardColor: configForCard.eventColor,
+      });
+      if (pendingReaction.sourceAction === "duel") {
+        continueDuelReaction(room, pendingReaction, targetPlayer);
+        broadcastRoom(room.id);
+        return;
+      }
     } else {
       addGameEvent(room, {
         type: "reaction",
@@ -1593,6 +1854,29 @@ export function startGameServer() {
     }
 
     broadcastRoom(room.id);
+  }
+
+  function continueDuelReaction(room, pendingReaction, actor) {
+    const targetPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === pendingReaction.actorPlayerId,
+    )?.player;
+
+    if (!targetPlayer?.isAlive) {
+      clearPendingReaction(room);
+      checkVictory(room);
+      return;
+    }
+
+    startPendingReaction(room, {
+      sourceAction: "duel",
+      actorPlayerId: actor.playerId,
+      actorName: actor.name,
+      targetPlayerId: targetPlayer.playerId,
+      targetName: targetPlayer.name,
+      healthLoss: pendingReaction.healthLoss || 1,
+      cardTitle: pendingReaction.cardTitle,
+      cardColor: pendingReaction.cardColor,
+    });
   }
 
   function isBarrelAllowedForReaction(pendingReaction) {
@@ -1730,6 +2014,7 @@ export function startGameServer() {
     clearFinishedRoomCleanup(room);
     clearEmptyRoomTimer(room.id);
     clearPendingReaction(room);
+    finishGeneralStore(room);
 
     room.seats.forEach((seat) => {
       if (seat.player) {
@@ -1766,6 +2051,7 @@ export function startGameServer() {
 
   function isCardPlayable(room, player, configForCard) {
     if (room.status !== "game") return false;
+    if (room.game.generalStore) return false;
     if (isReactionCardPlayable(room, player, configForCard)) return true;
     if (configForCard.playMode === "reaction") {
       return false;
@@ -2024,6 +2310,7 @@ export function startGameServer() {
     room.game.deck = shuffle(createDeck());
     room.game.discard = [];
     clearPendingReaction(room);
+    finishGeneralStore(room);
     room.game.turnPlayedEffects = {};
     room.game.turnEffectAllowances = {};
     room.game.turnCheck = null;
@@ -2252,6 +2539,162 @@ export function startGameServer() {
     player.hand = [...drawnCards, ...player.hand];
   }
 
+  function drawCardsFromDeck(room, count) {
+    const drawnCards = [];
+
+    for (let index = 0; index < count; index += 1) {
+      refillDeckIfNeeded(room);
+
+      const card = room.game.deck.shift();
+
+      if (!card) break;
+
+      drawnCards.push(card);
+    }
+
+    return drawnCards;
+  }
+
+  function startGeneralStore(room, players, cards) {
+    room.game.generalStore = {
+      id: randomUUID(),
+      cards,
+      pickerIndex: 0,
+      pickOrder: players.map((player) => ({
+        playerId: player.playerId,
+        name: player.name,
+        roleId: player.roleId,
+      })),
+      expiresAt: Date.now() + config.generalStorePickWindowMs,
+    };
+    advanceGeneralStore(room);
+  }
+
+  function chooseGeneralStoreCard(client, room, payload = {}) {
+    const generalStore = room.game.generalStore;
+    const currentPicker = getCurrentGeneralStorePicker(generalStore);
+
+    if (!generalStore || !currentPicker) {
+      sendError(client.socket, "Магазин уже закрыт");
+      return;
+    }
+
+    if (currentPicker.playerId !== client.playerId) {
+      sendError(client.socket, "Сейчас выбирает другой игрок");
+      return;
+    }
+
+    const cardIndex = generalStore.cards.findIndex(
+      (card) => card.instanceId === payload.cardInstanceId,
+    );
+
+    if (cardIndex === -1) {
+      sendError(client.socket, "Такой карты нет в магазине");
+      return;
+    }
+
+    giveGeneralStoreCard(room, cardIndex);
+    advanceGeneralStore(room);
+    broadcastRoom(room.id);
+  }
+
+  function scheduleGeneralStorePick(room) {
+    clearGeneralStoreTimer(room);
+
+    if (!room.game.generalStore) return;
+
+    room.generalStoreTimer = setTimeout(() => {
+      autoChooseGeneralStoreCard(room);
+    }, config.generalStorePickWindowMs);
+  }
+
+  function autoChooseGeneralStoreCard(room) {
+    const generalStore = room.game.generalStore;
+
+    if (!generalStore?.cards?.length) {
+      finishGeneralStore(room);
+      broadcastRoom(room.id);
+      return;
+    }
+
+    const cardIndex = randomInt(generalStore.cards.length);
+
+    giveGeneralStoreCard(room, cardIndex);
+    advanceGeneralStore(room);
+    broadcastRoom(room.id);
+  }
+
+  function giveGeneralStoreCard(room, cardIndex) {
+    const generalStore = room.game.generalStore;
+    const currentPicker = getCurrentGeneralStorePicker(generalStore);
+
+    if (!generalStore || !currentPicker) return false;
+
+    const player = room.seats.find(
+      (seat) => seat.player?.playerId === currentPicker.playerId,
+    )?.player;
+    const [card] = generalStore.cards.splice(cardIndex, 1);
+
+    if (card && player?.isAlive) {
+      player.hand.unshift(card);
+      addGameEvent(room, {
+        type: "generalStorePick",
+        actorName: player.name,
+        actorRoleId: player.roleId,
+        cardTitle: getCardEventTitle(card),
+      });
+    } else if (card) {
+      room.game.discard.push(card);
+    }
+
+    generalStore.pickerIndex += 1;
+    return true;
+  }
+
+  function advanceGeneralStore(room) {
+    const generalStore = room.game.generalStore;
+
+    if (!generalStore) return;
+
+    if (
+      generalStore.pickerIndex >= generalStore.pickOrder.length ||
+      generalStore.cards.length === 0
+    ) {
+      finishGeneralStore(room);
+      return;
+    }
+
+    if (generalStore.cards.length === 1) {
+      giveGeneralStoreCard(room, 0);
+      finishGeneralStore(room);
+      return;
+    }
+
+    generalStore.expiresAt = Date.now() + config.generalStorePickWindowMs;
+    scheduleGeneralStorePick(room);
+  }
+
+  function getCurrentGeneralStorePicker(generalStore) {
+    return generalStore?.pickOrder?.[generalStore.pickerIndex] || null;
+  }
+
+  function finishGeneralStore(room) {
+    clearGeneralStoreTimer(room);
+
+    if (room.game.generalStore?.cards?.length) {
+      room.game.discard.push(...room.game.generalStore.cards);
+    }
+
+    room.game.generalStore = null;
+  }
+
+  function clearGeneralStoreTimer(room) {
+    if (!room.generalStoreTimer) return;
+
+    clearTimeout(room.generalStoreTimer);
+    room.generalStoreTimer = null;
+  }
+
   function drawCheckCard(room) {
     refillDeckIfNeeded(room);
 
@@ -2454,6 +2897,7 @@ export function startGameServer() {
 
   function finishGame(room, winner, winnerText, winnerDetails = null) {
     clearPendingReaction(room);
+    finishGeneralStore(room);
     room.status = "finished";
     room.game.winner = winner;
     room.game.winnerText = winnerText;
@@ -2506,6 +2950,18 @@ export function startGameServer() {
     return room.seats
       .filter((seat) => seat.player?.isAlive)
       .map((seat) => seat.player);
+  }
+
+  function getAlivePlayersInTurnOrder(room, startPlayerId) {
+    const startSeatIndex = findSeatIndexByPlayerId(room, startPlayerId);
+
+    if (startSeatIndex === null) return [];
+
+    return Array.from({ length: room.seats.length }, (_, offset) => {
+      const seatIndex = (startSeatIndex + offset) % room.seats.length;
+
+      return room.seats[seatIndex].player;
+    }).filter((player) => player?.isAlive);
   }
 
   function getNextTurnPlayerId(room, currentPlayerId) {

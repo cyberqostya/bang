@@ -257,6 +257,18 @@ export const useRoomStore = defineStore("room", () => {
     cancelSelectedCard();
   }
 
+  function useTargetTableCard(targetPlayerId, targetCard) {
+    if (!selectedCard.value?.targetTableCardMode) return;
+
+    send("game:action", {
+      action: selectedCard.value.action,
+      cardInstanceId: selectedCard.value.instanceId,
+      targetPlayerId,
+      ...targetCard,
+    });
+    cancelSelectedCard();
+  }
+
   function endTurn() {
     send("game:action", {
       action: "endTurn",
@@ -287,6 +299,13 @@ export const useRoomStore = defineStore("room", () => {
 
     send("game:action", {
       action: "checkTurnBlueCard",
+      cardInstanceId,
+    });
+  }
+
+  function chooseGeneralStoreCard(cardInstanceId) {
+    send("game:action", {
+      action: "chooseGeneralStoreCard",
       cardInstanceId,
     });
   }
@@ -466,6 +485,7 @@ export const useRoomStore = defineStore("room", () => {
     activateWeaponProperty,
     checkBarrel,
     checkTurnBlueCard,
+    chooseGeneralStoreCard,
     closeRoom,
     connect,
     createRoom,
@@ -482,6 +502,7 @@ export const useRoomStore = defineStore("room", () => {
     startGame,
     startDiscardingCards,
     takeSeat,
+    useTargetTableCard,
     useSelectedCard,
   };
 });

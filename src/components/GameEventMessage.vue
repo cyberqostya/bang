@@ -68,12 +68,59 @@ function openCard(cardId) {
       </span>
     </template>
 
+    <template v-else-if="event.type === 'targetTableCard'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
+      <span class="game-event-message__separator"> -- </span>
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.targetRoleId, event.targetName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <template v-if="event.cardId === 'panic'">
+        <span>взял</span>
+        <span class="game-event-message__separator"> -- </span>
+        <GameEventCardTitle
+          :card-id="event.affectedCardId"
+          :title="event.affectedCardTitle"
+          :color="event.affectedCardColor"
+          :interactive="props.tone !== 'light'"
+          :tone="props.tone"
+          @open-card="openCard"
+        />
+      </template>
+      <template v-else>
+        <span>сброс</span>
+        <span class="game-event-message__separator"> -- </span>
+        <span>{{ event.affectedCardTitle }}</span>
+      </template>
+    </template>
+
     <template v-else-if="event.type === 'discard'">
       <span class="game-event-message__player">
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
       <span class="game-event-message__separator"> -- </span>
       <span>сброс</span>
+      <span class="game-event-message__separator"> -- </span>
+      <span>{{ event.cardTitle }}</span>
+    </template>
+
+    <template v-else-if="event.type === 'generalStorePick'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <span>взял из магазина</span>
       <span class="game-event-message__separator"> -- </span>
       <span>{{ event.cardTitle }}</span>
     </template>
@@ -229,6 +276,23 @@ function openCard(cardId) {
       </span>
     </template>
 
+    <template v-else-if="event.type === 'lifeSavingBeer'">
+      <span class="game-event-message__player">
+        {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
+      </span>
+      <span class="game-event-message__separator"> -- </span>
+      <GameEventCardTitle
+        :card-id="event.cardId"
+        :title="event.cardTitle"
+        :color="event.cardColor"
+        :interactive="props.tone !== 'light'"
+        :tone="props.tone"
+        @open-card="openCard"
+      />
+      <span class="game-event-message__separator"> -- </span>
+      <span>на грани смерти</span>
+    </template>
+
     <template v-else-if="event.type === 'groupHeal'">
       <template v-for="(player, index) in event.players" :key="player.playerId">
         <span v-if="index > 0">, </span>
@@ -259,6 +323,10 @@ function openCard(cardId) {
       </span>
       <span class="game-event-message__separator"> -- </span>
       <span class="game-event-message__damage"> -{{ event.amount }}HP </span>
+      <template v-if="event.reasonText">
+        <span class="game-event-message__separator"> -- </span>
+        <span>{{ event.reasonText }}</span>
+      </template>
     </template>
 
     <template v-else-if="event.type === 'outlawBounty'">

@@ -11,7 +11,7 @@ import { useGameTable } from "../composables/useGameTable.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
-const emit = defineEmits(["showCards"]);
+const emit = defineEmits(["showCards", "inspectPlayer"]);
 const tableElement = ref(null);
 const statusElementsBySeatIndex = new Map();
 const turnLightAngle = ref(0);
@@ -108,7 +108,7 @@ onBeforeUnmount(() => {
         },
       ]"
       type="button"
-      :disabled="!seat.isTargetable && !seat.isOwn"
+      :disabled="!seat.player"
       @click.stop="handleSeatClick(seat)"
     >
       <span
@@ -131,6 +131,7 @@ onBeforeUnmount(() => {
           v-for="status in seat.cardStatuses"
           :key="status.cardId"
           class="game-seat__card-status"
+          :class="`game-seat__card-status_${status.cardId}`"
           :style="status.style"
           :title="status.title"
         >
@@ -196,8 +197,8 @@ onBeforeUnmount(() => {
     from calc(var(--turn-light-angle) - 36deg) at 50% 50%,
     transparent 0deg,
     rgba(240, 160, 32, 0.06) 10deg,
-    rgba(240, 160, 32, 0.32) 23deg,
-    rgba(240, 160, 32, 0.26) 45deg,
+    rgba(240, 160, 32, 0.25) 23deg,
+    rgba(240, 160, 32, 0.25) 45deg,
     rgba(240, 160, 32, 0.06) 62deg,
     transparent 76deg 360deg
   );
@@ -252,28 +253,48 @@ onBeforeUnmount(() => {
 .game-seat__statuses {
   --status-radius: 59px;
   --status-diagonal: calc(var(--status-radius) * 0.707);
+  --status-ring-color: rgba(94, 84, 70, 0.34);
+  --status-ring-width: 1px;
   position: absolute;
   left: 50%;
   top: 42%;
   z-index: 1;
   width: calc(var(--status-radius) * 2);
   height: calc(var(--status-radius) * 2);
-  border: 1px dashed rgba(94, 84, 70, 0.34);
   border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
 }
 
+.game-seat__statuses::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: var(--status-ring-width) dashed var(--status-ring-color);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .game-seat_own .game-seat__statuses {
-  border-color: rgba(240, 160, 32, 0.92);
-  border-width: 2px;
-  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.12);
+  --status-ring-color: var(--ink);
+  --status-ring-width: 2px;
+}
+
+.game-seat_turn .game-seat__statuses {
+  --status-ring-color: var(--gold);
+  --status-ring-width: 2px;
+}
+
+.game-seat_turn .game-seat__statuses::before {
+  animation: status-ring-spin 14s linear infinite;
 }
 
 .game-seat__health {
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -294,6 +315,7 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 1;
   display: grid;
   place-items: center;
   width: 20px;
@@ -342,6 +364,7 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 1;
   display: grid;
   place-items: center;
   width: 22px;
@@ -357,6 +380,11 @@ onBeforeUnmount(() => {
   display: block;
   width: 100%;
   object-fit: contain;
+}
+
+.game-seat__card-status_dynamite {
+  width: 30px;
+  height: 30px;
 }
 
 .game-seat__reticle {
@@ -614,6 +642,12 @@ onBeforeUnmount(() => {
   100% {
     opacity: 0;
     transform: translate(-50%, -50%) scale(1.2);
+  }
+}
+
+@keyframes status-ring-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>
