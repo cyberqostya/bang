@@ -13,6 +13,11 @@ const previewCard = ref(null);
 const { freezeLeavingCard } = useCardLeaveAnimation();
 
 function handleCardTap(card) {
+  if (roomStore.isPayingCharacterAbility) {
+    roomStore.selectCard(card.instanceId);
+    return;
+  }
+
   if (roomStore.isDiscardingCards || card.isPlayable) {
     roomStore.selectCard(card.instanceId);
   }
@@ -45,10 +50,17 @@ function closePreview() {
         :is-disabled="
           card.isBlockedByTurnRule &&
           card.cardId !== 'bang' &&
-          !roomStore.isDiscardingCards
+          !roomStore.isDiscardingCards &&
+          !roomStore.isPayingCharacterAbility
         "
-        :can-select="card.isPlayable || roomStore.isDiscardingCards"
-        :is-discarding="roomStore.isDiscardingCards"
+        :can-select="
+          card.isPlayable ||
+          roomStore.isDiscardingCards ||
+          roomStore.isPayingCharacterAbility
+        "
+        :is-discarding="
+          roomStore.isDiscardingCards || roomStore.isPayingCharacterAbility
+        "
         @preview="openPreview"
         @select="handleCardTap(card)"
       />

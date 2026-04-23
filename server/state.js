@@ -15,6 +15,7 @@ export function createRoomState(options) {
     finishedRoomTimer: null,
     pendingReactionTimer: null,
     generalStoreTimer: null,
+    checkChoiceTimer: null,
   };
 }
 
@@ -27,6 +28,7 @@ export function createPlayerState(options) {
     health,
     maxHealth: health,
     roleId: null,
+    characterId: null,
     isRoleRevealed: false,
     isAlive: true,
     connected: true,
@@ -58,6 +60,10 @@ export function createEmptyGameState() {
     discard: [],
     pendingReaction: null,
     generalStore: null,
+    pendingCheckChoice: null,
+    pendingCharacterPayment: null,
+    pendingTurnDiscard: null,
+    activeCharacterAbilities: {},
     turnPlayedEffects: {},
     turnEffectAllowances: {},
     turnDrawTaken: false,

@@ -11,6 +11,7 @@ import {
 } from "./utils.js";
 import { cardConfig, createDeck } from "./cards.js";
 import { getRolesForPlayerCount, roleConfig } from "./roles.js";
+import { characterConfig, getCharacterIds } from "../shared/characterConfig.js";
 import { createLogger } from "./logger.js";
 import { shuffle } from "./random.js";
 import { createPublicStateSerializer } from "./serializers.js";
@@ -22,6 +23,9 @@ import {
   isDynamiteInPlay as isSharedDynamiteInPlay,
 } from "../shared/gameRules.js";
 
+const DECK_REFILL_THRESHOLD = 13;
+const DISCARD_VISIBLE_CARDS_COUNT = 5;
+
 export function startGameServer() {
   const logger = createLogger("server");
   const rooms = new Map();
@@ -32,9 +36,11 @@ export function startGameServer() {
   const wss = new WebSocketServer({ port: config.port });
   const publicState = createPublicStateSerializer({
     roleConfig,
+    characterConfig,
     cardConfig,
     getRoomPlayersCount,
     getPlayerStatuses,
+    getEffectiveCardConfig,
     isCardPlayable,
     isCardBlockedByTurnRule,
     isReactionCardPlayable,
@@ -533,6 +539,60 @@ export function startGameServer() {
       return;
     }
 
+    if (payload.action === "cancelCharacterPayment") {
+      cancelCharacterPayment(client, room);
+      return;
+    }
+
+    if (payload.action === "selectCharacterPaymentCard") {
+      selectCharacterPaymentCard(client, room, payload);
+      return;
+    }
+
+    if (payload.action === "cancelTurnDiscard") {
+      cancelTurnDiscard(client, room);
+      return;
+    }
+
+    if (
+      room.game.pendingCharacterPayment
+    ) {
+      sendError(client.socket, "Ждем оплату свойства персонажа");
+      return;
+    }
+
+    if (
+      room.game.pendingTurnDiscard &&
+      room.game.pendingTurnDiscard.playerId !== client.playerId
+    ) {
+      sendError(client.socket, "Ждем сброс карт");
+      return;
+    }
+
+    if (
+      room.game.pendingTurnDiscard &&
+      room.game.pendingTurnDiscard.playerId === client.playerId &&
+      payload.action !== "discardCard"
+    ) {
+      sendError(client.socket, "Сначала завершите или отмените сброс");
+      return;
+    }
+
+    if (room.game.pendingCheckChoice) {
+      if (payload.action === "chooseCheckCard") {
+        chooseCheckCard(client, room, payload);
+        return;
+      }
+
+      sendError(client.socket, "Сначала выберите карту проверки");
+      return;
+    }
+
+    if (payload.action === "activateCharacterAbility") {
+      activateCharacterAbility(client, room);
+      return;
+    }
+
     if (room.game.pendingReaction) {
       if (payload.action === "checkBarrel") {
         checkBarrelReaction(client, room);
@@ -626,6 +686,9 @@ export function startGameServer() {
   }
 
   function completeTurn(room, playerId) {
+    flushHandChangedPlayers(room);
+    room.game.pendingTurnDiscard = null;
+
     const nextPlayerId = getNextTurnPlayerId(room, playerId);
 
     if (!nextPlayerId) {
@@ -635,6 +698,7 @@ export function startGameServer() {
     if (room.game.turnEffectAllowances) {
       room.game.turnEffectAllowances[playerId] = {};
     }
+    clearActiveCharacterAbility(room, playerId);
     startTurn(room, nextPlayerId);
     return true;
   }
@@ -659,7 +723,31 @@ export function startGameServer() {
       return;
     }
 
-    drawCards(room, client.playerId, 2);
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+
+    if (!actor) {
+      sendError(client.socket, "Игрок не найден");
+      return;
+    }
+
+    if (hasActiveCharacterAbilityEffect(room, actor.playerId, "drawDiscardTop")) {
+      drawCardsWithDiscardTop(room, actor);
+      clearActiveCharacterAbility(room, actor.playerId);
+    } else if (
+      hasActiveCharacterAbilityEffect(
+        room,
+        actor.playerId,
+        "revealSecondDrawSuitBonus",
+      )
+    ) {
+      drawCardsWithSecondCardSuitBonus(room, actor);
+      clearActiveCharacterAbility(room, actor.playerId);
+    } else {
+      drawCards(room, client.playerId, 2);
+    }
+
     room.game.turnDrawTaken = true;
     broadcastRoom(room.id);
   }
@@ -688,23 +776,74 @@ export function startGameServer() {
       return;
     }
 
-    const [discardedCard] = actor.hand.splice(cardIndex, 1);
-
-    room.game.discard.push(discardedCard);
-    markTurnActionTaken(room);
-    addGameEvent(room, {
-      type: "discard",
-      actorName: actor.name,
-      actorRoleId: actor.roleId,
-      cardId: discardedCard.cardId,
-      cardTitle: getCardEventTitle(discardedCard),
-      cardColor: getCardEventColor(discardedCard),
+    const discardedCard = takeCardFromHand(room, actor, cardIndex, {
+      allowEmptyHandAbilities: false,
     });
+    const pendingDiscard =
+      room.game.pendingTurnDiscard || createTurnDiscard(actor);
+
+    pendingDiscard.cards.push({
+      card: discardedCard,
+      index: cardIndex,
+    });
+    room.game.pendingTurnDiscard = pendingDiscard;
+    markTurnActionTaken(room);
 
     if (actor.hand.length <= actor.health) {
+      resolveTurnDiscard(room, actor, pendingDiscard);
       completeTurn(room, client.playerId);
     }
 
+    broadcastRoom(room.id);
+  }
+
+  function createTurnDiscard(player) {
+    return {
+      id: randomUUID(),
+      playerId: player.playerId,
+      cards: [],
+    };
+  }
+
+  function resolveTurnDiscard(room, actor, pendingDiscard) {
+    if (!pendingDiscard?.cards?.length) return;
+
+    const cards = pendingDiscard.cards.map((entry) => entry.card);
+
+    room.game.discard.push(...cards);
+    room.game.pendingTurnDiscard = null;
+    addDiscardEvent(room, actor, cards);
+  }
+
+  function cancelTurnDiscard(client, room) {
+    const pendingDiscard = room.game.pendingTurnDiscard;
+
+    if (!pendingDiscard) {
+      broadcastRoom(room.id);
+      return;
+    }
+
+    if (pendingDiscard.playerId !== client.playerId) {
+      sendError(client.socket, "Нельзя отменить чужой сброс");
+      return;
+    }
+
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+
+    if (actor) {
+      [...pendingDiscard.cards].reverse().forEach((entry) => {
+        actor.hand.splice(Math.min(entry.index, actor.hand.length), 0, entry.card);
+      });
+      afterPlayerHandChanged(room, actor, {
+        allowEmptyHandAbilities: false,
+      });
+    } else {
+      room.game.discard.push(...pendingDiscard.cards.map((entry) => entry.card));
+    }
+
+    room.game.pendingTurnDiscard = null;
     broadcastRoom(room.id);
   }
 
@@ -728,7 +867,15 @@ export function startGameServer() {
     }
 
     const card = actor.hand[cardIndex];
-    const configForCard = cardConfig[card.cardId];
+    const baseConfigForCard = cardConfig[card.cardId];
+    const characterConversion = getActiveCharacterConversion(
+      room,
+      actor,
+      card,
+      baseConfigForCard,
+    );
+    const configForCard =
+      characterConversion?.targetConfig || baseConfigForCard;
     const usesEffectAllowance =
       configForCard?.effectLimitKey &&
       hasTurnEffectBeenPlayed(
@@ -772,6 +919,7 @@ export function startGameServer() {
       card,
       cardIndex,
       configForCard,
+      characterConversion,
       usesEffectAllowance,
     });
 
@@ -779,6 +927,7 @@ export function startGameServer() {
     if (actionResult.completed) return;
 
     completePlayedCard(client, room, actor, cardIndex, configForCard, {
+      characterConversion,
       usesEffectAllowance,
     });
   }
@@ -791,7 +940,7 @@ export function startGameServer() {
     configForCard,
     options = {},
   ) {
-    const { usesEffectAllowance = false } = options;
+    const { characterConversion = null, usesEffectAllowance = false } = options;
 
     if (configForCard.effectLimitKey) {
       if (usesEffectAllowance) {
@@ -810,8 +959,12 @@ export function startGameServer() {
     }
 
     if (configForCard.disposable) {
-      const [discardedCard] = actor.hand.splice(cardIndex, 1);
+      const discardedCard = takeCardFromHand(room, actor, cardIndex);
       room.game.discard.push(discardedCard);
+    }
+
+    if (characterConversion) {
+      clearActiveCharacterAbility(room, actor.playerId);
     }
 
     broadcastRoom(room.id);
@@ -825,6 +978,7 @@ export function startGameServer() {
       actor,
       card,
       configForCard,
+      characterConversion,
       usesEffectAllowance,
     } = context;
     const result = applyBangAction(client, room, payload);
@@ -835,12 +989,24 @@ export function startGameServer() {
       addWeaponPropertyUseEvent(room, actor, configForCard.effectLimitKey);
     }
 
+    if (characterConversion) {
+      addCharacterPropertyUseEvent(room, actor, characterConversion);
+    }
+
+    const reactionModifier = getReactionModifier(room, actor, "bang");
+
+    if (reactionModifier) {
+      addCharacterAbilityUseEvent(room, actor, {
+        effect: reactionModifier.effect,
+      });
+    }
+
     addGameEvent(room, {
       type: "card",
       actorName: actor.name,
       actorRoleId: actor.roleId,
-      cardId: card.cardId,
-      cardTitle: getCardEventTitle(card),
+      cardId: configForCard.id,
+      cardTitle: getConfigEventTitle(configForCard),
       cardColor: configForCard.eventColor,
       previewCard: getReactionEventPreviewCard(
         room,
@@ -859,8 +1025,9 @@ export function startGameServer() {
       targetPlayerId: result.targetPlayer.playerId,
       targetName: result.targetPlayer.name,
       healthLoss: result.healthLoss,
-      cardTitle: getCardEventTitle(card),
+      cardTitle: getConfigEventTitle(configForCard),
       cardColor: configForCard.eventColor,
+      reactionModifier,
     });
 
     return {};
@@ -918,13 +1085,13 @@ export function startGameServer() {
 
     if (!result) return false;
 
-    const [playedCard] = actor.hand.splice(cardIndex, 1);
+    const playedCard = takeCardFromHand(room, actor, cardIndex);
     const mode = configForCard.targetTableCardMode || "take";
 
     room.game.discard.push(playedCard);
 
     if (mode === "take") {
-      actor.hand.unshift(result.targetCard);
+      addCardsToHand(room, actor, result.targetCard);
     } else {
       room.game.discard.push(result.targetCard);
     }
@@ -954,6 +1121,14 @@ export function startGameServer() {
 
     if (!result) return false;
 
+    const reactionModifier = getReactionModifier(room, actor, sourceAction);
+
+    if (reactionModifier) {
+      addCharacterAbilityUseEvent(room, actor, {
+        effect: reactionModifier.effect,
+      });
+    }
+
     addCardOnlyEvent(room, actor, card, configForCard);
     markTurnActionTaken(room);
     startPendingReaction(room, {
@@ -969,6 +1144,7 @@ export function startGameServer() {
       })),
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
+      reactionModifier,
     });
 
     return {};
@@ -999,7 +1175,7 @@ export function startGameServer() {
 
   function playDrawCardsCard(context) {
     const { room, actor, card, cardIndex, configForCard } = context;
-    const [discardedCard] = actor.hand.splice(cardIndex, 1);
+    const discardedCard = takeCardFromHand(room, actor, cardIndex);
 
     drawCards(room, actor.playerId, configForCard.drawCount || 1);
     room.game.discard.push(discardedCard);
@@ -1025,7 +1201,7 @@ export function startGameServer() {
       return false;
     }
 
-    const [discardedCard] = actor.hand.splice(cardIndex, 1);
+    const discardedCard = takeCardFromHand(room, actor, cardIndex);
 
     room.game.discard.push(discardedCard);
     markTurnActionTaken(room);
@@ -1039,8 +1215,8 @@ export function startGameServer() {
   function playEquipWeaponCard(context) {
     const { room, actor, card, cardIndex, configForCard } = context;
 
-    equipWeapon(room, actor, card, configForCard);
-    actor.hand.splice(cardIndex, 1);
+    const replacedWeapon = equipWeapon(room, actor, card, configForCard);
+    takeCardFromHand(room, actor, cardIndex);
     markTurnActionTaken(room);
     addGameEvent(room, {
       type: "equip",
@@ -1050,6 +1226,16 @@ export function startGameServer() {
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
     });
+    if (replacedWeapon) {
+      addGameEvent(room, {
+        type: "discard",
+        actorName: actor.name,
+        actorRoleId: actor.roleId,
+        cardId: replacedWeapon.cardId,
+        cardTitle: getCardEventTitle(replacedWeapon),
+        cardColor: getCardEventColor(replacedWeapon),
+      });
+    }
     broadcastRoom(room.id);
     return { completed: true };
   }
@@ -1063,7 +1249,7 @@ export function startGameServer() {
     }
 
     playBlueCard(actor, card);
-    actor.hand.splice(cardIndex, 1);
+    takeCardFromHand(room, actor, cardIndex);
     markTurnActionTaken(room);
     addCardOnlyEvent(room, actor, card, configForCard);
     broadcastRoom(room.id);
@@ -1084,7 +1270,7 @@ export function startGameServer() {
 
     if (!result) return false;
 
-    actor.hand.splice(cardIndex, 1);
+    takeCardFromHand(room, actor, cardIndex);
     markTurnActionTaken(room);
     addGameEvent(room, {
       type: "card",
@@ -1142,6 +1328,37 @@ export function startGameServer() {
       cardTitle: getCardEventTitle(card),
       cardColor: configForCard.eventColor,
       amount: configForCard.healAmount || 1,
+    });
+  }
+
+  function addDiscardEvent(room, actor, cards) {
+    const discardCards = Array.isArray(cards) ? cards : [cards];
+    const eventCards = discardCards.filter(Boolean).map((card) => ({
+      cardId: card.cardId,
+      cardTitle: getCardEventTitle(card),
+      cardColor: getCardEventColor(card),
+    }));
+
+    if (eventCards.length === 0) return;
+
+    addGameEvent(room, {
+      type: "discard",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      cardId: eventCards[0].cardId,
+      cardTitle: eventCards[0].cardTitle,
+      cardColor: eventCards[0].cardColor,
+      cards: eventCards,
+    });
+  }
+
+  function addCharacterHealEvent(room, actor, amount = 1) {
+    addGameEvent(room, {
+      type: "heal",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      cardColor: cardConfig.beer.eventColor,
+      amount,
     });
   }
 
@@ -1205,13 +1422,18 @@ export function startGameServer() {
   }
 
   function equipWeapon(room, actor, card, configForCard) {
+    let replacedWeapon = null;
+
     if (actor.weapon) {
+      replacedWeapon = actor.weapon;
       clearWeaponPropertyAllowances(room, actor);
       room.game.discard.push(actor.weapon);
     }
 
     actor.weapon = card;
     actor.attackRange = configForCard.weaponRange || config.defaultAttackRange;
+
+    return replacedWeapon;
   }
 
   function clearWeaponPropertyAllowances(room, actor) {
@@ -1287,6 +1509,612 @@ export function startGameServer() {
       weaponConfig.propertyCharges || 1,
     );
     broadcastRoom(room.id);
+  }
+
+  function activateCharacterAbility(client, room) {
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const character = actor?.characterId
+      ? characterConfig[actor.characterId]
+      : null;
+
+    if (!actor || !character?.ability) {
+      sendError(client.socket, "У персонажа нет активного свойства");
+      return;
+    }
+
+    if (character.ability.trigger !== "activate") {
+      sendError(client.socket, "Это свойство не активируется вручную");
+      return;
+    }
+
+    if (
+      ![
+        "convertBangMissed",
+        "drawDiscardTop",
+        "chooseCheckCard",
+        "revealSecondDrawSuitBonus",
+        "discardCardsToHeal",
+      ].includes(
+        character.ability.effect,
+      )
+    ) {
+      sendError(client.socket, "Это свойство пока не поддерживается");
+      return;
+    }
+
+    if (hasActiveCharacterAbility(room, actor.playerId)) {
+      clearActiveCharacterAbility(room, actor.playerId);
+      broadcastRoom(room.id);
+      return;
+    }
+
+    if (!canActivateCharacterAbility(room, actor, character.ability.effect)) {
+      sendError(client.socket, "Сейчас нельзя активировать это свойство");
+      return;
+    }
+
+    setActiveCharacterAbility(room, actor.playerId, {
+      characterId: character.id,
+      effect: character.ability.effect,
+    });
+    broadcastRoom(room.id);
+  }
+
+  function canActivateCharacterAbility(room, player, effect) {
+    if (effect === "convertBangMissed") {
+      return canActivateBangMissedConversion(room, player);
+    }
+
+    if (effect === "drawDiscardTop") {
+      return canActivateDrawDiscardTop(room, player);
+    }
+
+    if (effect === "revealSecondDrawSuitBonus") {
+      return canActivateDrawPhaseAbility(room, player);
+    }
+
+    if (effect === "discardCardsToHeal") {
+      return canActivateDiscardCardsToHeal(room, player);
+    }
+
+    if (effect === "chooseCheckCard") {
+      return canActivateCheckCardChoice(room, player);
+    }
+
+    return false;
+  }
+
+  function getEffectiveCardConfig(room, player, card, configForCard) {
+    return (
+      getActiveCharacterConversion(room, player, card, configForCard)
+        ?.targetConfig || configForCard
+    );
+  }
+
+  function getActiveCharacterConversion(room, player, card, configForCard) {
+    const activeAbility =
+      room.game.activeCharacterAbilities?.[player?.playerId] || null;
+
+    if (
+      !activeAbility ||
+      activeAbility.characterId !== player?.characterId ||
+      activeAbility.effect !== "convertBangMissed"
+    ) {
+      return null;
+    }
+
+    if (card.cardId === "bang" && canUseBangAsMissed(room, player)) {
+      return createCharacterConversion(player, configForCard, cardConfig.missed);
+    }
+
+    if (
+      card.cardId === "missed" &&
+      (canUseMissedAsBangReaction(room, player) ||
+        canUseMissedAsBang(room, player))
+    ) {
+      return createCharacterConversion(player, configForCard, cardConfig.bang);
+    }
+
+    return null;
+  }
+
+  function createCharacterConversion(player, sourceConfig, targetConfig) {
+    return {
+      characterId: player.characterId,
+      characterTitle: characterConfig[player.characterId]?.title,
+      sourceConfig,
+      targetConfig,
+    };
+  }
+
+  function canActivateBangMissedConversion(room, player) {
+    if (room.game.pendingReaction) {
+      return (
+        (canUseBangAsMissed(room, player) &&
+          player.hand.some((card) => card.cardId === "bang")) ||
+        (canUseMissedAsBangReaction(room, player) &&
+          player.hand.some((card) => card.cardId === "missed"))
+      );
+    }
+
+    return (
+      canActivateMissedAsBang(room, player) &&
+      player.hand.some((card) => card.cardId === "missed")
+    );
+  }
+
+  function canUseBangAsMissed(room, player) {
+    const pendingReaction = room.game.pendingReaction;
+
+    return Boolean(
+      pendingReaction &&
+        player?.isAlive &&
+        isPendingReactionTarget(pendingReaction, player.playerId) &&
+        isReactionAllowed(pendingReaction, player, cardConfig.missed),
+    );
+  }
+
+  function canUseMissedAsBangReaction(room, player) {
+    const pendingReaction = room.game.pendingReaction;
+
+    return Boolean(
+      pendingReaction &&
+        player?.isAlive &&
+        isPendingReactionTarget(pendingReaction, player.playerId) &&
+        isReactionAllowed(pendingReaction, player, cardConfig.bang),
+    );
+  }
+
+  function canUseMissedAsBang(room, player) {
+    const bangLimitKey = cardConfig.bang.effectLimitKey;
+
+    return Boolean(
+      canActivateMissedAsBang(room, player) &&
+        (!hasTurnEffectBeenPlayed(room, player.playerId, bangLimitKey) ||
+          hasTurnEffectAllowance(room, player.playerId, bangLimitKey))
+    );
+  }
+
+  function canActivateMissedAsBang(room, player) {
+    return Boolean(
+      !room.game.pendingReaction &&
+        !room.game.generalStore &&
+        !room.game.pendingCheckChoice &&
+        player?.isAlive &&
+        room.game.turnPlayerId === player.playerId &&
+        !hasRequiredTurnCheck(room, player.playerId),
+    );
+  }
+
+  function canActivateDrawDiscardTop(room, player) {
+    return Boolean(
+      canActivateDrawPhaseAbility(room, player) &&
+        getTopDiscardCard(room),
+    );
+  }
+
+  function canActivateDrawPhaseAbility(room, player) {
+    return Boolean(
+      !room.game.pendingReaction &&
+        !room.game.generalStore &&
+        !room.game.pendingCheckChoice &&
+        player?.isAlive &&
+        room.game.turnPlayerId === player.playerId &&
+        !hasRequiredTurnCheck(room, player.playerId) &&
+        !room.game.turnDrawTaken &&
+        !room.game.turnActionTaken,
+    );
+  }
+
+  function canActivateCheckCardChoice(room, player) {
+    return Boolean(
+      player?.isAlive &&
+        !room.game.generalStore &&
+        !room.game.pendingCheckChoice &&
+        (canCheckTurnBlueCardNow(room, player) ||
+          canCheckBarrelForPendingReaction(room, player)),
+    );
+  }
+
+  function canActivateDiscardCardsToHeal(room, player) {
+    const character = characterConfig[player?.characterId];
+    const requiredCards = character?.ability?.requiredCards || 2;
+
+    return Boolean(
+      player?.isAlive &&
+        !room.game.generalStore &&
+        !room.game.pendingCheckChoice &&
+        !room.game.pendingCharacterPayment &&
+        player.health < player.maxHealth &&
+        getPlayerPaymentCardsCount(player) >= requiredCards,
+    );
+  }
+
+  function getPlayerPaymentCardsCount(player) {
+    return (
+      (player?.hand?.length || 0) +
+      (player?.blueCards?.length || 0) +
+      (player?.weapon ? 1 : 0)
+    );
+  }
+
+  function getReactionModifier(room, actor, sourceAction) {
+    const character = actor?.characterId
+      ? characterConfig[actor.characterId]
+      : null;
+    const ability = character?.ability;
+
+    if (
+      ability?.trigger !== "passive" ||
+      ability?.effect !== "requiresExtraMissed" ||
+      !ability.sourceActions?.includes(sourceAction)
+    ) {
+      return null;
+    }
+
+    return {
+      characterId: character.id,
+      characterTitle: character.title,
+      effect: ability.effect,
+      reactionAction: ability.reactionAction || "missed",
+      requiredCount: ability.requiredCount || 2,
+    };
+  }
+
+  function hasActiveCharacterAbility(room, playerId) {
+    return Boolean(room.game.activeCharacterAbilities?.[playerId]);
+  }
+
+  function hasActiveCharacterAbilityEffect(room, playerId, effect) {
+    return room.game.activeCharacterAbilities?.[playerId]?.effect === effect;
+  }
+
+  function setActiveCharacterAbility(room, playerId, ability) {
+    room.game.activeCharacterAbilities ||= {};
+    room.game.activeCharacterAbilities[playerId] = ability;
+  }
+
+  function clearActiveCharacterAbility(room, playerId) {
+    if (!room.game.activeCharacterAbilities) return;
+
+    delete room.game.activeCharacterAbilities[playerId];
+  }
+
+  function addCharacterPropertyUseEvent(room, actor, conversion) {
+    addGameEvent(room, {
+      type: "characterPropertyUse",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      characterId: actor.characterId,
+      characterTitle: conversion.characterTitle,
+      sourceCardId: conversion.sourceConfig.id,
+      sourceCardTitle: getConfigEventTitle(conversion.sourceConfig),
+      sourceCardColor: conversion.sourceConfig.eventColor,
+      targetCardId: conversion.targetConfig.id,
+      targetCardTitle: getConfigEventTitle(conversion.targetConfig),
+      targetCardColor: conversion.targetConfig.eventColor,
+    });
+  }
+
+  function addCharacterAbilityUseEvent(room, actor, options = {}) {
+    addGameEvent(room, {
+      type: "characterAbilityUse",
+      actorName: actor.name,
+      actorRoleId: actor.roleId,
+      characterId: actor.characterId,
+      characterTitle: characterConfig[actor.characterId]?.title,
+      ...options,
+    });
+  }
+
+  function takeCardFromHand(room, player, cardIndex, options = {}) {
+    if (
+      !player ||
+      !Number.isInteger(cardIndex) ||
+      cardIndex < 0 ||
+      cardIndex >= player.hand.length
+    ) {
+      return null;
+    }
+
+    const [card] = player.hand.splice(cardIndex, 1);
+
+    afterPlayerHandChanged(room, player, {
+      allowEmptyHandAbilities: options.allowEmptyHandAbilities !== false,
+    });
+    return card || null;
+  }
+
+  function addCardsToHand(room, player, cards, options = {}) {
+    const nextCards = Array.isArray(cards) ? cards.filter(Boolean) : [cards].filter(Boolean);
+
+    if (!player || nextCards.length === 0) return [];
+
+    if (options.position === "end") {
+      player.hand.push(...nextCards);
+    } else {
+      player.hand.unshift(...nextCards);
+    }
+
+    afterPlayerHandChanged(room, player, {
+      allowEmptyHandAbilities: options.allowEmptyHandAbilities !== false,
+    });
+    return nextCards;
+  }
+
+  function clearPlayerHand(room, player) {
+    if (!player?.hand.length) return [];
+
+    const cards = [...player.hand];
+
+    player.hand = [];
+    afterPlayerHandChanged(room, player);
+    return cards;
+  }
+
+  function selectCharacterPaymentCard(client, room, payload = {}) {
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const activeAbility =
+      room.game.activeCharacterAbilities?.[client.playerId] || null;
+    const payment = room.game.pendingCharacterPayment || null;
+
+    if (!actor?.isAlive) {
+      sendError(client.socket, "Игрок не найден");
+      return;
+    }
+
+    if (
+      payment &&
+      payment.playerId !== client.playerId
+    ) {
+      sendError(client.socket, "Сейчас свойство оплачивает другой игрок");
+      return;
+    }
+
+    if (
+      !payment &&
+      (activeAbility?.characterId !== actor.characterId ||
+        activeAbility?.effect !== "discardCardsToHeal")
+    ) {
+      sendError(client.socket, "Сначала активируйте свойство персонажа");
+      return;
+    }
+
+    if (!payment && !canActivateDiscardCardsToHeal(room, actor)) {
+      clearActiveCharacterAbility(room, actor.playerId);
+      sendError(client.socket, "Сейчас нельзя оплатить это свойство");
+      broadcastRoom(room.id);
+      return;
+    }
+
+    const paymentCard = takeCharacterPaymentCard(room, actor, payload);
+
+    if (!paymentCard) {
+      sendError(client.socket, "Эту карту нельзя выбрать");
+      return;
+    }
+
+    const nextPayment =
+      payment ||
+      createCharacterPayment(room, actor, characterConfig[actor.characterId]);
+
+    nextPayment.cards.push(paymentCard);
+    room.game.pendingCharacterPayment = nextPayment;
+
+    if (nextPayment.cards.length < nextPayment.requiredCount) {
+      broadcastRoom(room.id);
+      return;
+    }
+
+    resolveCharacterPayment(room, actor, nextPayment);
+    broadcastRoom(room.id);
+  }
+
+  function cancelCharacterPayment(client, room) {
+    const payment = room.game.pendingCharacterPayment;
+
+    if (!payment) {
+      const actor = room.seats.find(
+        (seat) => seat.player?.playerId === client.playerId,
+      )?.player;
+
+      if (actor) {
+        clearActiveCharacterAbility(room, actor.playerId);
+        broadcastRoom(room.id);
+      }
+      return;
+    }
+
+    if (payment.playerId !== client.playerId) {
+      sendError(client.socket, "Нельзя отменить чужое свойство");
+      return;
+    }
+
+    restoreCharacterPayment(room, payment);
+    room.game.pendingCharacterPayment = null;
+    clearActiveCharacterAbility(room, payment.playerId);
+    broadcastRoom(room.id);
+  }
+
+  function createCharacterPayment(room, player, character) {
+    clearActiveCharacterAbility(room, player.playerId);
+
+    return {
+      id: randomUUID(),
+      playerId: player.playerId,
+      characterId: character.id,
+      characterTitle: character.title,
+      effect: character.ability.effect,
+      requiredCount: character.ability.requiredCards || 2,
+      healAmount: character.ability.healAmount || 1,
+      cards: [],
+    };
+  }
+
+  function takeCharacterPaymentCard(room, player, payload) {
+    if (payload.source === "weapon") {
+      if (!player.weapon) return null;
+
+      const card = player.weapon;
+      clearWeaponPropertyAllowances(room, player);
+      player.weapon = null;
+      player.attackRange = config.defaultAttackRange;
+      return {
+        card,
+        source: "weapon",
+        index: 0,
+      };
+    }
+
+    if (payload.source === "blue") {
+      const cardIndex =
+        player.blueCards?.findIndex(
+          (card) => card.instanceId === payload.cardInstanceId,
+        ) ?? -1;
+
+      if (cardIndex === -1) return null;
+
+      const [card] = player.blueCards.splice(cardIndex, 1);
+
+      if (room.game.turnCheck?.playerId === player.playerId) {
+        setNextTurnCheck(room, player);
+      }
+
+      return {
+        card,
+        source: "blue",
+        index: cardIndex,
+      };
+    }
+
+    const cardIndex = player.hand.findIndex(
+      (card) => card.instanceId === payload.cardInstanceId,
+    );
+
+    if (cardIndex === -1) return null;
+
+    return {
+      card: takeCardFromHand(room, player, cardIndex, {
+        allowEmptyHandAbilities: false,
+      }),
+      source: "hand",
+      index: cardIndex,
+    };
+  }
+
+  function restoreCharacterPayment(room, payment) {
+    const player = room.seats.find(
+      (seat) => seat.player?.playerId === payment.playerId,
+    )?.player;
+
+    if (!player) {
+      room.game.discard.push(...payment.cards.map((entry) => entry.card));
+      return;
+    }
+
+    [...payment.cards].reverse().forEach((entry) => {
+      if (entry.source === "weapon") {
+        if (player.weapon) {
+          room.game.discard.push(entry.card);
+          return;
+        }
+
+        player.weapon = entry.card;
+        player.attackRange = cardConfig[entry.card.cardId]?.weaponRange || 1;
+        return;
+      }
+
+      if (entry.source === "blue") {
+        player.blueCards ||= [];
+        player.blueCards.splice(
+          Math.min(entry.index, player.blueCards.length),
+          0,
+          entry.card,
+        );
+        if (room.game.turnPlayerId === player.playerId) {
+          setNextTurnCheck(room, player);
+        }
+        return;
+      }
+
+      player.hand.splice(Math.min(entry.index, player.hand.length), 0, entry.card);
+      afterPlayerHandChanged(room, player, {
+        allowEmptyHandAbilities: false,
+      });
+    });
+  }
+
+  function resolveCharacterPayment(room, actor, payment) {
+    room.game.pendingCharacterPayment = null;
+    room.game.discard.push(...payment.cards.map((entry) => entry.card));
+    addCharacterAbilityUseEvent(room, actor, {
+      effect: payment.effect,
+    });
+    payment.cards.forEach((entry) => {
+      addGameEvent(room, {
+        type: "discard",
+        actorName: actor.name,
+        actorRoleId: actor.roleId,
+        cardId: entry.card.cardId,
+        cardTitle: getCardEventTitle(entry.card),
+        cardColor: getCardEventColor(entry.card),
+      });
+    });
+    healPlayer(actor, payment.healAmount);
+    addCharacterHealEvent(room, actor, payment.healAmount);
+  }
+
+  function afterPlayerHandChanged(room, player, options = {}) {
+    const { allowEmptyHandAbilities = true } = options;
+
+    if (!allowEmptyHandAbilities) return;
+
+    room.game.handChangedPlayerIds ||= new Set();
+    room.game.handChangedPlayerIds.add(player.playerId);
+  }
+
+  function flushHandChangedPlayers(room) {
+    if (!room.game?.handChangedPlayerIds?.size) return;
+
+    const playerIds = [...room.game.handChangedPlayerIds];
+
+    room.game.handChangedPlayerIds.clear();
+
+    playerIds.forEach((playerId) => {
+      const player = room.seats.find(
+        (seat) => seat.player?.playerId === playerId,
+      )?.player;
+
+      if (player) {
+        tryTriggerEmptyHandCharacterAbility(room, player);
+      }
+    });
+  }
+
+  function tryTriggerEmptyHandCharacterAbility(room, player) {
+    const ability = characterConfig[player?.characterId]?.ability;
+
+    if (
+      !player?.isAlive ||
+      player.hand.length > 0 ||
+      ability?.trigger !== "passive" ||
+      ability?.effect !== "emptyHandDrawDeck"
+    ) {
+      return false;
+    }
+
+    const drawnCards = drawCards(room, player.playerId, 1);
+
+    if (drawnCards.length === 0) return false;
+
+    addCharacterAbilityUseEvent(room, player, {
+      effect: "emptyHandDrawDeck",
+    });
+    return true;
   }
 
   function applyBangAction(client, room, payload = {}) {
@@ -1433,9 +2261,9 @@ export function startGameServer() {
         return null;
       }
 
-      const [card] = targetPlayer.hand.splice(cardIndex, 1);
+    const card = takeCardFromHand(room, targetPlayer, cardIndex);
 
-      return card;
+    return card;
     }
 
     return null;
@@ -1467,6 +2295,7 @@ export function startGameServer() {
       targetPlayerId: reaction.targetPlayerId || targetPlayerIds[0] || null,
       healthLoss: reaction.healthLoss || 1,
       barrelChecks: {},
+      reactionProgress: {},
       expiresAt: Date.now() + config.reactionWindowMs,
     };
     room.pendingReactionTimer = setTimeout(() => {
@@ -1478,6 +2307,8 @@ export function startGameServer() {
     const pendingReaction = room.game.pendingReaction;
 
     if (!pendingReaction) return;
+
+    returnPartialReactionCards(room, pendingReaction);
 
     const targetPlayers = getPendingReactionTargetIds(pendingReaction)
       .map(
@@ -1492,17 +2323,26 @@ export function startGameServer() {
 
     clearPendingReaction(room);
 
+    const defeatedPlayers = [];
+
     targetPlayers
       .filter((targetPlayer) => targetPlayer.isAlive)
       .forEach((targetPlayer) => {
         applyHealthLoss(room, targetPlayer, pendingReaction.healthLoss, {
+          silent: pendingReaction.sourceAction === "dynamite",
           reasonText:
             pendingReaction.sourceAction === "duel" ? "проиграл дуэль" : "",
         });
-        revealDeadPlayer(room, targetPlayer, actor);
+        if (revealDeadPlayer(room, targetPlayer)) {
+          defeatedPlayers.push(targetPlayer);
+        }
       });
 
-    checkVictory(room);
+    if (!checkVictory(room)) {
+      defeatedPlayers.forEach((targetPlayer) => {
+        applyDeathRewards(room, targetPlayer, actor);
+      });
+    }
 
     const turnPlayer = room.seats.find(
       (seat) => seat.player?.playerId === room.game.turnPlayerId,
@@ -1530,14 +2370,40 @@ export function startGameServer() {
   }
 
   function clearPendingReaction(room) {
-    if (room.pendingReactionTimer) {
-      clearTimeout(room.pendingReactionTimer);
-      room.pendingReactionTimer = null;
+    const pendingReaction = room.game?.pendingReaction;
+
+    if (pendingReaction) {
+      getPendingReactionTargetIds(pendingReaction).forEach((playerId) => {
+        clearActiveCharacterAbility(room, playerId);
+      });
     }
+
+    clearPendingReactionTimer(room);
 
     if (room.game) {
       room.game.pendingReaction = null;
     }
+  }
+
+  function clearPendingReactionTimer(room) {
+    if (!room.pendingReactionTimer) return;
+
+    clearTimeout(room.pendingReactionTimer);
+    room.pendingReactionTimer = null;
+  }
+
+  function restartPendingReactionTimer(room) {
+    clearPendingReactionTimer(room);
+
+    if (!room.game.pendingReaction) return;
+
+    room.game.pendingReaction = {
+      ...room.game.pendingReaction,
+      expiresAt: Date.now() + config.reactionWindowMs,
+    };
+    room.pendingReactionTimer = setTimeout(() => {
+      resolvePendingReactionTimeout(room);
+    }, config.reactionWindowMs);
   }
 
   function getPendingReactionTargetIds(pendingReaction) {
@@ -1550,10 +2416,74 @@ export function startGameServer() {
     return getPendingReactionTargetIds(pendingReaction).includes(playerId);
   }
 
+  function getRequiredReactionCount(pendingReaction, action) {
+    const modifier = pendingReaction?.reactionModifier;
+
+    if (modifier?.reactionAction !== action) return 1;
+
+    return Math.max(1, modifier.requiredCount || 1);
+  }
+
+  function getReactionProgress(pendingReaction, playerId, action) {
+    const progress = pendingReaction?.reactionProgress?.[playerId];
+
+    if (!progress || progress.action !== action) return 0;
+
+    return progress.count || 0;
+  }
+
+  function addPartialReactionCard(room, pendingReaction, player, action, card) {
+    const previousProgress = pendingReaction.reactionProgress?.[player.playerId];
+    const previousCards =
+      previousProgress?.action === action ? previousProgress.cards || [] : [];
+
+    room.game.pendingReaction = {
+      ...pendingReaction,
+      reactionProgress: {
+        ...(pendingReaction.reactionProgress || {}),
+        [player.playerId]: {
+          action,
+          count: previousCards.length + 1,
+          cards: [...previousCards, card],
+        },
+      },
+    };
+  }
+
+  function commitPartialReactionCards(room, pendingReaction, playerId) {
+    const progress = pendingReaction.reactionProgress?.[playerId];
+
+    if (!progress?.cards?.length) return;
+
+    room.game.discard.push(...progress.cards);
+  }
+
+  function returnPartialReactionCards(room, pendingReaction) {
+    Object.entries(pendingReaction.reactionProgress || {}).forEach(
+      ([playerId, progress]) => {
+        if (!progress?.cards?.length) return;
+
+        const player = room.seats.find(
+          (seat) => seat.player?.playerId === playerId,
+        )?.player;
+
+        if (player?.isAlive) {
+          addCardsToHand(room, player, progress.cards, {
+            allowEmptyHandAbilities: false,
+          });
+        } else {
+          room.game.discard.push(...progress.cards);
+        }
+      },
+    );
+  }
+
   function completePendingReactionTarget(room, playerId) {
     const pendingReaction = room.game.pendingReaction;
 
     if (!pendingReaction) return;
+
+    commitPartialReactionCards(room, pendingReaction, playerId);
 
     const nextTargetPlayerIds = getPendingReactionTargetIds(
       pendingReaction,
@@ -1570,6 +2500,11 @@ export function startGameServer() {
       targetPlayerId: nextTargetPlayerIds[0],
       barrelChecks: Object.fromEntries(
         Object.entries(pendingReaction.barrelChecks || {}).filter(
+          ([targetPlayerId]) => nextTargetPlayerIds.includes(targetPlayerId),
+        ),
+      ),
+      reactionProgress: Object.fromEntries(
+        Object.entries(pendingReaction.reactionProgress || {}).filter(
           ([targetPlayerId]) => nextTargetPlayerIds.includes(targetPlayerId),
         ),
       ),
@@ -1609,6 +2544,16 @@ export function startGameServer() {
       return;
     }
 
+    if (
+      startCheckChoiceIfAvailable(room, targetPlayer, {
+        type: "barrelReaction",
+        pendingReactionId: pendingReaction.id,
+      })
+    ) {
+      broadcastRoom(room.id);
+      return;
+    }
+
     const drawnCard = drawCheckCard(room);
 
     if (!drawnCard) {
@@ -1616,26 +2561,64 @@ export function startGameServer() {
       return;
     }
 
+    resolveBarrelReactionCheck(room, targetPlayer, drawnCard);
+    broadcastRoom(room.id);
+  }
+
+  function resolveBarrelReactionCheck(room, targetPlayer, drawnCard, options = {}) {
+    const pendingReaction = room.game.pendingReaction;
+    const { discardDrawn = true } = options;
+
+    if (!pendingReaction || !targetPlayer || !drawnCard) return false;
+
     const isSuccess = drawnCard.suit?.id === "hearts";
 
-    room.game.discard.push(drawnCard);
+    if (discardDrawn) {
+      room.game.discard.push(drawnCard);
+    }
 
     if (isSuccess) {
       addBarrelCheckEvent(room, targetPlayer, drawnCard, true);
-      completePendingReactionTarget(room, client.playerId);
-      broadcastRoom(room.id);
-      return;
+      const action = "missed";
+      const nextProgress =
+        getReactionProgress(pendingReaction, targetPlayer.playerId, action) + 1;
+
+      if (
+        nextProgress >=
+        getRequiredReactionCount(pendingReaction, action)
+      ) {
+        completePendingReactionTarget(room, targetPlayer.playerId);
+      } else {
+        room.game.pendingReaction = {
+          ...pendingReaction,
+          reactionProgress: {
+            ...(pendingReaction.reactionProgress || {}),
+            [targetPlayer.playerId]: {
+              action,
+              count: nextProgress,
+              cards:
+                pendingReaction.reactionProgress?.[targetPlayer.playerId]
+                  ?.cards || [],
+            },
+          },
+          barrelChecks: {
+            ...(pendingReaction.barrelChecks || {}),
+            [targetPlayer.playerId]: getBarrelCheckResult(drawnCard, true),
+          },
+        };
+      }
+      return true;
     }
 
     room.game.pendingReaction = {
       ...pendingReaction,
       barrelChecks: {
         ...(pendingReaction.barrelChecks || {}),
-        [client.playerId]: getBarrelCheckResult(drawnCard, false),
+        [targetPlayer.playerId]: getBarrelCheckResult(drawnCard, false),
       },
     };
     addBarrelCheckEvent(room, targetPlayer, drawnCard, false);
-    broadcastRoom(room.id);
+    return true;
   }
 
   function checkTurnBlueCard(client, room, payload = {}) {
@@ -1668,29 +2651,89 @@ export function startGameServer() {
       return;
     }
 
-    if (card.cardId === "jail") {
-      checkJailTurnCard(room, actor, card);
+    if (!isTurnCheckCard(card)) {
+      sendError(client.socket, "Эту карту нельзя проверить");
+      return;
+    }
+
+    if (
+      startCheckChoiceIfAvailable(room, actor, {
+        type: "turnBlueCard",
+        cardInstanceId: card.instanceId,
+      })
+    ) {
       broadcastRoom(room.id);
       return;
     }
 
-    if (card.cardId === "dynamite") {
-      checkDynamiteTurnCard(room, actor, card);
-      broadcastRoom(room.id);
-      return;
-    }
-
-    sendError(client.socket, "Эту карту нельзя проверить");
+    resolveTurnBlueCardCheck(room, actor, card);
+    broadcastRoom(room.id);
   }
 
-  function checkJailTurnCard(room, actor, card) {
-    const drawnCard = drawCheckCard(room);
+  function canCheckTurnBlueCardNow(room, player) {
+    const turnCheck = room.game.turnCheck;
+
+    if (
+      !turnCheck ||
+      room.game.turnPlayerId !== player?.playerId ||
+      turnCheck.playerId !== player.playerId
+    ) {
+      return false;
+    }
+
+    const card = player.blueCards?.find(
+      (candidate) => candidate.instanceId === turnCheck.cardInstanceId,
+    );
+
+    return isTurnCheckCard(card);
+  }
+
+  function canCheckBarrelForPendingReaction(room, player) {
+    const pendingReaction = room.game.pendingReaction;
+
+    return Boolean(
+      pendingReaction &&
+        isPendingReactionTarget(pendingReaction, player?.playerId) &&
+        isBarrelAllowedForReaction(pendingReaction) &&
+        hasBlueCardInPlay(player, "barrel") &&
+        !pendingReaction.barrelChecks?.[player.playerId],
+    );
+  }
+
+  function isTurnCheckCard(card) {
+    return getCardCheckConfig(card)?.timing === "turn";
+  }
+
+  function resolveTurnBlueCardCheck(room, actor, card, drawnCard = drawCheckCard(room), options = {}) {
+    const checkConfig = getCardCheckConfig(card);
+
+    if (checkConfig?.type === "jail") {
+      checkJailTurnCard(room, actor, card, drawnCard, options);
+      return true;
+    }
+
+    if (checkConfig?.type === "dynamite") {
+      checkDynamiteTurnCard(room, actor, card, drawnCard, options);
+      return true;
+    }
+
+    return false;
+  }
+
+  function getCardCheckConfig(card) {
+    return cardConfig[card?.cardId]?.check || null;
+  }
+
+  function checkJailTurnCard(room, actor, card, drawnCard = drawCheckCard(room), options = {}) {
+    const { discardDrawn = true } = options;
 
     if (!drawnCard) return;
 
     const isSuccess = drawnCard.suit?.id === "hearts";
 
-    room.game.discard.push(drawnCard);
+    if (discardDrawn) {
+      room.game.discard.push(drawnCard);
+    }
     discardBlueCard(room, actor, card.instanceId);
     addTurnCheckEvent(room, actor, {
       checkCard: card,
@@ -1698,6 +2741,7 @@ export function startGameServer() {
       consequenceText: isSuccess ? "вышел из тюрьмы" : "пропуск хода",
       drawnCard,
     });
+    addDiscardEvent(room, actor, options.discardAfterCheckCards || []);
 
     if (!isSuccess) {
       room.game.turnCheck = null;
@@ -1708,14 +2752,16 @@ export function startGameServer() {
     setNextTurnCheck(room, actor);
   }
 
-  function checkDynamiteTurnCard(room, actor, card) {
-    const drawnCard = drawCheckCard(room);
+  function checkDynamiteTurnCard(room, actor, card, drawnCard = drawCheckCard(room), options = {}) {
+    const { discardDrawn = true } = options;
 
     if (!drawnCard) return;
 
     const isExplosion = isDynamiteExplosionCard(drawnCard);
 
-    room.game.discard.push(drawnCard);
+    if (discardDrawn) {
+      room.game.discard.push(drawnCard);
+    }
     discardBlueCard(room, actor, card.instanceId, { toDiscard: isExplosion });
 
     if (!isExplosion) {
@@ -1726,6 +2772,7 @@ export function startGameServer() {
         consequenceText: "передал динамит дальше",
         drawnCard,
       });
+      addDiscardEvent(room, actor, options.discardAfterCheckCards || []);
       setNextTurnCheck(room, actor);
       return;
     }
@@ -1740,6 +2787,7 @@ export function startGameServer() {
       damageAmount: 3,
       damageColor: cardConfig.bang.eventColor,
     });
+    addDiscardEvent(room, actor, options.discardAfterCheckCards || []);
     room.game.turnCheck = null;
 
     if (actor.health === 3) {
@@ -1757,8 +2805,11 @@ export function startGameServer() {
     }
 
     applyHealthLoss(room, actor, 3, { silent: true });
-    revealDeadPlayer(room, actor, owner);
-    checkVictory(room);
+    const wasRevealed = revealDeadPlayer(room, actor);
+
+    if (wasRevealed && !checkVictory(room)) {
+      applyDeathRewards(room, actor, owner);
+    }
 
     if (!actor.isAlive && !room.game.winner) {
       completeTurn(room, actor.playerId);
@@ -1793,7 +2844,15 @@ export function startGameServer() {
     }
 
     const card = targetPlayer.hand[cardIndex];
-    const configForCard = cardConfig[card.cardId];
+    const baseConfigForCard = cardConfig[card.cardId];
+    const characterConversion = getActiveCharacterConversion(
+      room,
+      targetPlayer,
+      card,
+      baseConfigForCard,
+    );
+    const configForCard =
+      characterConversion?.targetConfig || baseConfigForCard;
 
     if (
       !configForCard ||
@@ -1804,7 +2863,39 @@ export function startGameServer() {
       return;
     }
 
-    const [discardedCard] = targetPlayer.hand.splice(cardIndex, 1);
+    const reactionAction = configForCard.action;
+    const requiredReactionCount = getRequiredReactionCount(
+      pendingReaction,
+      reactionAction,
+    );
+    const nextReactionProgress =
+      getReactionProgress(
+        pendingReaction,
+        targetPlayer.playerId,
+        reactionAction,
+      ) +
+      1;
+    const isPartialReaction = nextReactionProgress < requiredReactionCount;
+    const discardedCard = takeCardFromHand(room, targetPlayer, cardIndex, {
+      allowEmptyHandAbilities: !isPartialReaction,
+    });
+
+    if (isPartialReaction) {
+      if (characterConversion) {
+        addCharacterPropertyUseEvent(room, targetPlayer, characterConversion);
+        clearActiveCharacterAbility(room, targetPlayer.playerId);
+      }
+
+      addPartialReactionCard(
+        room,
+        pendingReaction,
+        targetPlayer,
+        reactionAction,
+        discardedCard,
+      );
+      broadcastRoom(room.id);
+      return;
+    }
 
     room.game.discard.push(discardedCard);
 
@@ -1819,28 +2910,45 @@ export function startGameServer() {
       payload.action === "bang" &&
       ["duel", "indians"].includes(pendingReaction.sourceAction)
     ) {
+      if (characterConversion) {
+        addCharacterPropertyUseEvent(room, targetPlayer, characterConversion);
+      }
+
       addGameEvent(room, {
         type: "discard",
         actorName: targetPlayer.name,
         actorRoleId: targetPlayer.roleId,
-        cardId: card.cardId,
-        cardTitle: getCardEventTitle(card),
+        cardId: configForCard.id,
+        cardTitle: getConfigEventTitle(configForCard),
         cardColor: configForCard.eventColor,
       });
+
+      if (characterConversion) {
+        clearActiveCharacterAbility(room, targetPlayer.playerId);
+      }
+
       if (pendingReaction.sourceAction === "duel") {
         continueDuelReaction(room, pendingReaction, targetPlayer);
         broadcastRoom(room.id);
         return;
       }
     } else {
+      if (characterConversion) {
+        addCharacterPropertyUseEvent(room, targetPlayer, characterConversion);
+      }
+
       addGameEvent(room, {
         type: "reaction",
         actorName: targetPlayer.name,
         actorRoleId: targetPlayer.roleId,
-        cardId: card.cardId,
-        cardTitle: getCardEventTitle(card),
+        cardId: configForCard.id,
+        cardTitle: getConfigEventTitle(configForCard),
         cardColor: configForCard.eventColor,
       });
+    }
+
+    if (characterConversion) {
+      clearActiveCharacterAbility(room, targetPlayer.playerId);
     }
 
     completePendingReactionTarget(room, client.playerId);
@@ -1863,7 +2971,6 @@ export function startGameServer() {
 
     if (!targetPlayer?.isAlive) {
       clearPendingReaction(room);
-      checkVictory(room);
       return;
     }
 
@@ -2015,6 +3122,9 @@ export function startGameServer() {
     clearEmptyRoomTimer(room.id);
     clearPendingReaction(room);
     finishGeneralStore(room);
+    clearPendingCheckChoice(room);
+    room.game.pendingCharacterPayment = null;
+    room.game.pendingTurnDiscard = null;
 
     room.seats.forEach((seat) => {
       if (seat.player) {
@@ -2052,7 +3162,10 @@ export function startGameServer() {
   function isCardPlayable(room, player, configForCard) {
     if (room.status !== "game") return false;
     if (room.game.generalStore) return false;
+    if (room.game.pendingCheckChoice) return false;
+    if (room.game.pendingCharacterPayment) return false;
     if (isReactionCardPlayable(room, player, configForCard)) return true;
+    if (room.game.pendingReaction) return false;
     if (configForCard.playMode === "reaction") {
       return false;
     }
@@ -2264,6 +3377,7 @@ export function startGameServer() {
   function getPlayerDistance(room, fromPlayerId, toPlayerId) {
     return getSharedPlayerDistance(room.seats, fromPlayerId, toPlayerId, {
       getCardConfig: (card) => cardConfig[card.cardId],
+      getCharacterConfig: (player) => characterConfig[player.characterId],
     });
   }
 
@@ -2272,6 +3386,7 @@ export function startGameServer() {
       .filter((seat) => seat.player)
       .map((seat) => seat.player);
     const roles = shuffle(getRolesForPlayerCount(players.length));
+    const characters = shuffle(getCharacterIds());
     const hatSkinKeys = shuffle(
       Array.from({ length: config.hatSkinCount }, (_, index) =>
         String(index + 1),
@@ -2280,12 +3395,13 @@ export function startGameServer() {
 
     players.forEach((player, index) => {
       player.roleId = roles[index];
+      player.characterId = characters[index] || null;
       player.isRoleRevealed = player.roleId === "sheriff";
       player.isAlive = true;
       player.leftGame = false;
       player.connected = true;
-      player.health = config.defaultHealth;
-      player.maxHealth = config.defaultHealth;
+      player.health = getPlayerBaseHealth(player);
+      player.maxHealth = player.health;
       player.attackRange = config.defaultAttackRange;
       player.hand = [];
       player.weapon = null;
@@ -2311,6 +3427,10 @@ export function startGameServer() {
     room.game.discard = [];
     clearPendingReaction(room);
     finishGeneralStore(room);
+    clearPendingCheckChoice(room);
+    room.game.pendingCharacterPayment = null;
+    room.game.pendingTurnDiscard = null;
+    room.game.activeCharacterAbilities = {};
     room.game.turnPlayedEffects = {};
     room.game.turnEffectAllowances = {};
     room.game.turnCheck = null;
@@ -2319,6 +3439,10 @@ export function startGameServer() {
       room,
       "Раздача ролей завершена. Раздача карт согласно запасу здоровья игроков завершена.",
     );
+  }
+
+  function getPlayerBaseHealth(player) {
+    return characterConfig[player.characterId]?.health || config.defaultHealth;
   }
 
   function playBlueCard(actor, card) {
@@ -2499,6 +3623,7 @@ export function startGameServer() {
     room.game.turnPlayerId = playerId;
     room.game.turnPlayedEffects[playerId] = {};
     room.game.turnEffectAllowances[playerId] = {};
+    clearActiveCharacterAbility(room, playerId);
     room.game.turnDrawTaken = false;
     room.game.turnActionTaken = false;
 
@@ -2524,19 +3649,71 @@ export function startGameServer() {
     )?.player;
     const drawnCards = [];
 
-    if (!player) return;
+    if (!player) return [];
 
     for (let index = 0; index < count; index += 1) {
       refillDeckIfNeeded(room);
 
       const card = room.game.deck.shift();
 
-      if (!card) return;
+      if (!card) return drawnCards;
 
       drawnCards.push(card);
     }
 
-    player.hand = [...drawnCards, ...player.hand];
+    addCardsToHand(room, player, drawnCards, {
+      allowEmptyHandAbilities: false,
+    });
+
+    return drawnCards;
+  }
+
+  function drawCardsWithDiscardTop(room, player) {
+    const discardCard = takeTopDiscardCard(room);
+
+    if (!discardCard) {
+      drawCards(room, player.playerId, 2);
+      return;
+    }
+
+    addCardsToHand(room, player, discardCard, {
+      allowEmptyHandAbilities: false,
+    });
+    drawCards(room, player.playerId, 1);
+    addCharacterAbilityUseEvent(room, player, {
+      effect: "drawDiscardTop",
+      cardId: discardCard.cardId,
+      cardTitle: getCardEventTitle(discardCard),
+      cardColor: getCardEventColor(discardCard),
+    });
+  }
+
+  function drawCardsWithSecondCardSuitBonus(room, player) {
+    const character = characterConfig[player.characterId];
+    const ability = character?.ability || {};
+    const drawnCards = drawCards(room, player.playerId, 2);
+    const revealedCard = drawnCards[1];
+
+    if (!revealedCard) return;
+
+    const isSuccess = (ability.successSuits || []).includes(
+      revealedCard.suit?.id,
+    );
+
+    if (isSuccess) {
+      drawCards(room, player.playerId, ability.bonusDrawCount || 1);
+    }
+
+    addCharacterAbilityUseEvent(room, player, {
+      effect: ability.effect,
+    });
+    addTurnCheckEvent(room, player, {
+      checkCardTitle: "ЧервыБуби",
+      checkCardColor: "#c94a35",
+      isSuccess,
+      consequenceText: isSuccess ? "взял доп. карту" : "ничего",
+      drawnCard: revealedCard,
+    });
   }
 
   function drawCardsFromDeck(room, count) {
@@ -2636,7 +3813,9 @@ export function startGameServer() {
     const [card] = generalStore.cards.splice(cardIndex, 1);
 
     if (card && player?.isAlive) {
-      player.hand.unshift(card);
+      addCardsToHand(room, player, card, {
+        allowEmptyHandAbilities: false,
+      });
       addGameEvent(room, {
         type: "generalStorePick",
         actorName: player.name,
@@ -2695,6 +3874,170 @@ export function startGameServer() {
     room.generalStoreTimer = null;
   }
 
+  function startCheckChoiceIfAvailable(room, player, context) {
+    const activeAbility = room.game.activeCharacterAbilities?.[player.playerId];
+    const character = characterConfig[player.characterId];
+
+    if (
+      !activeAbility ||
+      activeAbility.characterId !== player.characterId ||
+      activeAbility.effect !== "chooseCheckCard" ||
+      character?.ability?.effect !== "chooseCheckCard"
+    ) {
+      return false;
+    }
+
+    const cardsCount = Math.max(2, character.ability.cardsCount || 2);
+    const cards = drawCardsFromDeck(room, cardsCount);
+
+    if (cards.length === 0) {
+      return false;
+    }
+
+    clearActiveCharacterAbility(room, player.playerId);
+
+    if (context.type === "barrelReaction") {
+      clearPendingReactionTimer(room);
+    }
+
+    room.game.pendingCheckChoice = {
+      id: randomUUID(),
+      playerId: player.playerId,
+      playerName: player.name,
+      playerRoleId: player.roleId,
+      characterId: player.characterId,
+      characterTitle: character.title,
+      effect: "chooseCheckCard",
+      cards,
+      context,
+      expiresAt: Date.now() + config.checkChoiceWindowMs,
+    };
+    scheduleCheckChoice(room);
+
+    return true;
+  }
+
+  function chooseCheckCard(client, room, payload = {}) {
+    const pendingCheckChoice = room.game.pendingCheckChoice;
+
+    if (!pendingCheckChoice) {
+      sendError(client.socket, "Проверка уже завершена");
+      return;
+    }
+
+    if (pendingCheckChoice.playerId !== client.playerId) {
+      sendError(client.socket, "Сейчас выбирает другой игрок");
+      return;
+    }
+
+    const cardIndex = pendingCheckChoice.cards.findIndex(
+      (card) => card.instanceId === payload.cardInstanceId,
+    );
+
+    if (cardIndex === -1) {
+      sendError(client.socket, "Такой карты нет в проверке");
+      return;
+    }
+
+    resolvePendingCheckChoice(room, cardIndex);
+    broadcastRoom(room.id);
+  }
+
+  function scheduleCheckChoice(room) {
+    clearCheckChoiceTimer(room);
+
+    if (!room.game.pendingCheckChoice) return;
+
+    room.checkChoiceTimer = setTimeout(() => {
+      autoChooseCheckCard(room);
+    }, config.checkChoiceWindowMs);
+  }
+
+  function autoChooseCheckCard(room) {
+    const pendingCheckChoice = room.game.pendingCheckChoice;
+
+    if (!pendingCheckChoice?.cards?.length) {
+      clearPendingCheckChoice(room);
+      broadcastRoom(room.id);
+      return;
+    }
+
+    resolvePendingCheckChoice(room, randomInt(pendingCheckChoice.cards.length));
+    broadcastRoom(room.id);
+  }
+
+  function resolvePendingCheckChoice(room, cardIndex) {
+    const pendingCheckChoice = room.game.pendingCheckChoice;
+
+    if (!pendingCheckChoice) return false;
+
+    const chosenCard = pendingCheckChoice.cards[cardIndex];
+    const unchosenCards = pendingCheckChoice.cards.filter(
+      (_, index) => index !== cardIndex,
+    );
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === pendingCheckChoice.playerId,
+    )?.player;
+    const context = pendingCheckChoice.context || {};
+    const choiceCards = pendingCheckChoice.cards;
+
+    clearPendingCheckChoice(room);
+    room.game.discard.push(...choiceCards);
+
+    if (actor?.isAlive) {
+      addCharacterAbilityUseEvent(room, actor, {
+        effect: pendingCheckChoice.effect,
+      });
+    }
+
+    if (!chosenCard || !actor?.isAlive) {
+      restartPendingReactionTimer(room);
+      return false;
+    }
+
+    if (context.type === "barrelReaction") {
+      if (room.game.pendingReaction?.id === context.pendingReactionId) {
+        resolveBarrelReactionCheck(room, actor, chosenCard, {
+          discardDrawn: false,
+        });
+      }
+      addDiscardEvent(room, actor, unchosenCards);
+      restartPendingReactionTimer(room);
+      return true;
+    }
+
+    if (context.type === "turnBlueCard") {
+      const card = actor.blueCards?.find(
+        (candidate) => candidate.instanceId === context.cardInstanceId,
+      );
+
+      if (card && isTurnCheckCard(card)) {
+        resolveTurnBlueCardCheck(room, actor, card, chosenCard, {
+          discardDrawn: false,
+          discardAfterCheckCards: unchosenCards,
+        });
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  function clearPendingCheckChoice(room) {
+    clearCheckChoiceTimer(room);
+
+    if (room.game) {
+      room.game.pendingCheckChoice = null;
+    }
+  }
+
+  function clearCheckChoiceTimer(room) {
+    if (!room.checkChoiceTimer) return;
+
+    clearTimeout(room.checkChoiceTimer);
+    room.checkChoiceTimer = null;
+  }
+
   function drawCheckCard(room) {
     refillDeckIfNeeded(room);
 
@@ -2702,16 +4045,40 @@ export function startGameServer() {
   }
 
   function refillDeckIfNeeded(room) {
-    if (room.game.deck.length >= 7 || room.game.discard.length === 0) return;
+    if (room.game.deck.length > DECK_REFILL_THRESHOLD) return;
+    if (room.game.discard.length <= DISCARD_VISIBLE_CARDS_COUNT) return;
 
-    room.game.deck = [...room.game.deck, ...shuffle(room.game.discard)];
-    room.game.discard = [];
-    addGameEvent(room, "Сброс перемешан и ушел под колоду.");
+    const cardsToKeep = room.game.discard.slice(-DISCARD_VISIBLE_CARDS_COUNT);
+    const cardsToRecycle = room.game.discard.slice(
+      0,
+      -DISCARD_VISIBLE_CARDS_COUNT,
+    );
+
+    if (cardsToRecycle.length === 0) return;
+
+    room.game.deck = [...room.game.deck, ...shuffle(cardsToRecycle)];
+    room.game.discard = cardsToKeep;
+    addGameEvent(
+      room,
+      "Старый сброс перемешан и ушел под низ колоды. Верх сброса остался на столе.",
+    );
+  }
+
+  function getTopDiscardCard(room) {
+    return room.game.discard[room.game.discard.length - 1] || null;
+  }
+
+  function takeTopDiscardCard(room) {
+    return room.game.discard.pop() || null;
   }
 
   function getCardEventTitle(card) {
     const configForCard = cardConfig[card.cardId];
 
+    return getConfigEventTitle(configForCard);
+  }
+
+  function getConfigEventTitle(configForCard) {
     return configForCard?.eventTitle || configForCard?.title || "неизвестно";
   }
 
@@ -2772,14 +4139,19 @@ export function startGameServer() {
     });
   }
 
-  function revealDeadPlayer(room, player, killer = null) {
-    if (player.health > 0 || !player.isAlive) return;
+  function revealDeadPlayer(room, player) {
+    if (player.health > 0 || !player.isAlive) return false;
 
     player.isAlive = false;
     player.isRoleRevealed = true;
 
-    discardPlayerCards(room, player);
+    handleDeadPlayerCards(room, player);
     addDeathEvent(room, player);
+    return true;
+  }
+
+  function applyDeathRewards(room, player, killer = null) {
+    if (player.health > 0 || player.isAlive) return;
 
     if (player.roleId === "outlaw" && killer?.isAlive) {
       drawCards(room, killer.playerId, 3);
@@ -2794,20 +4166,57 @@ export function startGameServer() {
     }
   }
 
-  function discardPlayerCards(room, player) {
-    if (player.hand.length > 0) {
-      room.game.discard.push(...player.hand);
-      player.hand = [];
+  function handleDeadPlayerCards(room, player) {
+    if (room.game.pendingCharacterPayment?.playerId === player.playerId) {
+      room.game.discard.push(
+        ...room.game.pendingCharacterPayment.cards.map((entry) => entry.card),
+      );
+      room.game.pendingCharacterPayment = null;
     }
+
+    if (room.game.pendingTurnDiscard?.playerId === player.playerId) {
+      room.game.discard.push(
+        ...room.game.pendingTurnDiscard.cards.map((entry) => entry.card),
+      );
+      room.game.pendingTurnDiscard = null;
+    }
+
+    const cards = collectPlayerCards(room, player);
+    const receiver = getDeadPlayerCardsReceiver(room, player);
+
+    if (receiver && cards.length > 0) {
+      addCardsToHand(room, receiver, cards, {
+        allowEmptyHandAbilities: false,
+      });
+      addGameEvent(room, {
+        type: "characterAbility",
+        actorName: receiver.name,
+        actorRoleId: receiver.roleId,
+        characterId: receiver.characterId,
+        characterTitle: characterConfig[receiver.characterId]?.title,
+        targetName: player.name,
+        targetRoleId: player.roleId,
+        cardsCount: cards.length,
+      });
+      return;
+    }
+
+    room.game.discard.push(...cards);
+  }
+
+  function collectPlayerCards(room, player) {
+    const cards = [];
+
+    cards.push(...clearPlayerHand(room, player));
 
     if (player.weapon) {
       clearWeaponPropertyAllowances(room, player);
-      room.game.discard.push(player.weapon);
+      cards.push(player.weapon);
       player.weapon = null;
     }
 
     if (player.blueCards?.length > 0) {
-      room.game.discard.push(...player.blueCards);
+      cards.push(...player.blueCards);
       player.blueCards = [];
     }
 
@@ -2815,7 +4224,29 @@ export function startGameServer() {
       room.game.turnCheck = null;
     }
 
+    clearActiveCharacterAbility(room, player.playerId);
     player.attackRange = config.defaultAttackRange;
+
+    return cards;
+  }
+
+  function discardPlayerCards(room, player) {
+    room.game.discard.push(...collectPlayerCards(room, player));
+  }
+
+  function getDeadPlayerCardsReceiver(room, deadPlayer) {
+    return (
+      getAlivePlayers(room).find((player) => {
+        if (player.playerId === deadPlayer.playerId) return false;
+
+        const ability = characterConfig[player.characterId]?.ability;
+
+        return (
+          ability?.trigger === "playerDeath" &&
+          ability?.effect === "takeDeadPlayerCards"
+        );
+      }) || null
+    );
   }
 
   function addDeathEvent(room, player) {
@@ -2839,7 +4270,7 @@ export function startGameServer() {
       room.seats.find((seat) => seat.player?.roleId === "sheriff")?.player ||
       null;
 
-    if (room.game.winner || !sheriff) return;
+    if (room.game.winner || !sheriff) return Boolean(room.game.winner);
 
     if (!sheriff.isAlive) {
       const aliveOutlaws = alivePlayers.filter(
@@ -2867,7 +4298,7 @@ export function startGameServer() {
               outlaws: aliveOutlaws.map(getPlayerSummary),
             },
       );
-      return;
+      return true;
     }
 
     if (alivePlayers.length === 1 && alivePlayers[0].roleId === "renegade") {
@@ -2875,7 +4306,7 @@ export function startGameServer() {
         type: "renegade",
         renegade: getPlayerSummary(alivePlayers[0]),
       });
-      return;
+      return true;
     }
 
     const hasEnemyOfSheriff = alivePlayers.some(
@@ -2892,12 +4323,18 @@ export function startGameServer() {
           .filter((player) => player.roleId === "deputy")
           .map(getPlayerSummary),
       });
+      return true;
     }
+
+    return false;
   }
 
   function finishGame(room, winner, winnerText, winnerDetails = null) {
     clearPendingReaction(room);
     finishGeneralStore(room);
+    clearPendingCheckChoice(room);
+    room.game.pendingCharacterPayment = null;
+    room.game.pendingTurnDiscard = null;
     room.status = "finished";
     room.game.winner = winner;
     room.game.winnerText = winnerText;
@@ -3096,6 +4533,10 @@ export function startGameServer() {
     const room = roomId ? rooms.get(roomId) : null;
 
     if (!room) return;
+
+    if (room.status === "game" || room.status === "finished") {
+      flushHandChangedPlayers(room);
+    }
 
     clients.forEach((client) => {
       if (client.roomId === roomId) {

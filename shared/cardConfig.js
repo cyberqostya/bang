@@ -250,6 +250,10 @@ export const cardConfig = {
     needsTarget: false,
     disposable: false,
     statusImage: "/images/statuses/barrel.webp",
+    check: {
+      timing: "reaction",
+      type: "barrel",
+    },
   },
   jail: {
     id: "jail",
@@ -263,6 +267,10 @@ export const cardConfig = {
     needsTarget: true,
     disposable: false,
     statusImage: "/images/statuses/jail.webp",
+    check: {
+      timing: "turn",
+      type: "jail",
+    },
   },
   dynamite: {
     id: "dynamite",
@@ -276,5 +284,9 @@ export const cardConfig = {
     needsTarget: true,
     disposable: false,
     statusImage: "/images/statuses/dynamite.webp",
+    check: {
+      timing: "turn",
+      type: "dynamite",
+    },
   },
 };

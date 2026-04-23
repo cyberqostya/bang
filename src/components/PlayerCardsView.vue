@@ -51,6 +51,7 @@ function takeCard(payload) {
   <PlayerTableZone
     :attack-range="player.attackRange || 1"
     :can-take-weapon="Boolean(canTakeCards && player.weapon)"
+    :character="player.character"
     :role="player.role"
     :role-can-open="isRolePublic"
     :role-face-up="isRolePublic"

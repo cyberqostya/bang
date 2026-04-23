@@ -1,9 +1,11 @@
 export function createPublicStateSerializer(dependencies) {
   const {
     roleConfig,
+    characterConfig,
     cardConfig,
     getRoomPlayersCount,
     getPlayerStatuses,
+    getEffectiveCardConfig,
     isCardPlayable,
     isCardBlockedByTurnRule,
     isReactionCardPlayable,
@@ -16,7 +18,7 @@ export function createPublicStateSerializer(dependencies) {
       status: room.status,
       hostPlayerId: room.hostPlayerId,
       playersCount: getRoomPlayersCount(room),
-      game: getPublicGame(room),
+      game: getPublicGame(room, viewerPlayerId),
       seats: room.seats.map((seat) => ({
         index: seat.index,
         player: seat.player
@@ -26,13 +28,16 @@ export function createPublicStateSerializer(dependencies) {
     };
   }
 
-  function getPublicGame(room) {
+  function getPublicGame(room, viewerPlayerId) {
     return {
       turnPlayerId: room.game.turnPlayerId,
       turnDrawTaken: room.game.turnDrawTaken,
       turnActionTaken: room.game.turnActionTaken,
       pendingReaction: getPublicPendingReaction(room),
       generalStore: getPublicGeneralStore(room),
+      pendingCheckChoice: getPublicPendingCheckChoice(room, viewerPlayerId),
+      pendingCharacterPayment: getPublicPendingCharacterPayment(room),
+      pendingTurnDiscard: getPublicPendingTurnDiscard(room, viewerPlayerId),
       turnCheck: room.game.turnCheck,
       winner: room.game.winner,
       winnerText: room.game.winnerText,
@@ -48,8 +53,19 @@ export function createPublicStateSerializer(dependencies) {
 
     if (!pendingReaction) return null;
 
+    const { reactionProgress = {}, ...publicReaction } = pendingReaction;
+
     return {
-      ...pendingReaction,
+      ...publicReaction,
+      reactionProgress: Object.fromEntries(
+        Object.entries(reactionProgress).map(([playerId, progress]) => [
+          playerId,
+          {
+            action: progress.action,
+            count: progress.count || 0,
+          },
+        ]),
+      ),
       remainingMs: Math.max(0, pendingReaction.expiresAt - Date.now()),
     };
   }
@@ -67,8 +83,56 @@ export function createPublicStateSerializer(dependencies) {
     };
   }
 
+  function getPublicPendingCheckChoice(room, viewerPlayerId) {
+    const pendingCheckChoice = room.game.pendingCheckChoice;
+
+    if (!pendingCheckChoice) return null;
+    if (pendingCheckChoice.playerId !== viewerPlayerId) return null;
+
+    return {
+      ...pendingCheckChoice,
+      cards: pendingCheckChoice.cards.map((card) =>
+        getPublicCard(room, null, card, { includePlayState: false }),
+      ),
+      remainingMs: Math.max(0, pendingCheckChoice.expiresAt - Date.now()),
+    };
+  }
+
+  function getPublicPendingCharacterPayment(room) {
+    const payment = room.game.pendingCharacterPayment;
+
+    if (!payment) return null;
+
+    return {
+      id: payment.id,
+      playerId: payment.playerId,
+      characterId: payment.characterId,
+      characterTitle: payment.characterTitle,
+      effect: payment.effect,
+      selectedCount: payment.cards?.length || 0,
+      requiredCount: payment.requiredCount || 0,
+    };
+  }
+
+  function getPublicPendingTurnDiscard(room, viewerPlayerId) {
+    const pendingTurnDiscard = room.game.pendingTurnDiscard;
+
+    if (!pendingTurnDiscard || pendingTurnDiscard.playerId !== viewerPlayerId) {
+      return null;
+    }
+
+    return {
+      id: pendingTurnDiscard.id,
+      playerId: pendingTurnDiscard.playerId,
+      selectedCount: pendingTurnDiscard.cards?.length || 0,
+    };
+  }
+
   function getPublicPlayer(room, player, viewerPlayerId) {
     const role = player.roleId ? roleConfig[player.roleId] : null;
+    const character = player.characterId
+      ? characterConfig[player.characterId]
+      : null;
     const canSeeRole = Boolean(
       role &&
         (player.playerId === viewerPlayerId ||
@@ -84,6 +148,8 @@ export function createPublicStateSerializer(dependencies) {
       attackRange: player.attackRange,
       activeEffectAllowances:
         room.game?.turnEffectAllowances?.[player.playerId] || {},
+      activeCharacterAbility:
+        room.game?.activeCharacterAbilities?.[player.playerId] || null,
       weapon: player.weapon
         ? getPublicCard(room, player, player.weapon, {
             includePlayState: false,
@@ -110,6 +176,18 @@ export function createPublicStateSerializer(dependencies) {
             team: role.team,
           }
         : null,
+      character: character
+        ? {
+            id: character.id,
+            title: character.title,
+            image: character.image,
+            health: character.health,
+            ability: character.ability,
+            distanceModifierFromSelf: character.distanceModifierFromSelf,
+            distanceModifierToSelf: character.distanceModifierToSelf,
+            rangeStatusBonus: character.rangeStatusBonus,
+          }
+        : null,
     };
   }
 
@@ -122,30 +200,36 @@ export function createPublicStateSerializer(dependencies) {
   function getPublicCard(room, player, card, options = {}) {
     const { includePlayState = false } = options;
     const configForCard = cardConfig[card.cardId];
+    const playConfigForCard =
+      includePlayState && player
+        ? getEffectiveCardConfig(room, player, card, configForCard)
+        : configForCard;
     const isReactionPlayable =
-      includePlayState && isReactionCardPlayable(room, player, configForCard);
+      includePlayState &&
+      isReactionCardPlayable(room, player, playConfigForCard);
     const publicCard = {
       ...card,
       title: configForCard.title,
       image: configForCard.image,
-      playMode: configForCard.playMode,
-      action: configForCard.action,
-      selectionView: configForCard.selectionView,
-      needsTarget: isReactionPlayable ? false : configForCard.needsTarget,
-      usesWeaponRange: configForCard.usesWeaponRange,
-      panicDistance: configForCard.panicDistance,
-      targetTableCardMode: configForCard.targetTableCardMode,
-      disposable: configForCard.disposable,
-      effectLimitKey: configForCard.effectLimitKey,
-      propertyAction: configForCard.propertyAction,
-      propertyEffectLimitKey: configForCard.propertyEffectLimitKey,
-      propertyCharges: configForCard.propertyCharges,
-      propertyLabel: configForCard.propertyLabel,
-      weaponRange: configForCard.weaponRange,
-      statusImage: configForCard.statusImage,
-      rangeStatusBonus: configForCard.rangeStatusBonus,
-      distanceModifierFromSelf: configForCard.distanceModifierFromSelf,
-      distanceModifierToSelf: configForCard.distanceModifierToSelf,
+      playMode: playConfigForCard.playMode,
+      action: playConfigForCard.action,
+      selectionView: playConfigForCard.selectionView,
+      needsTarget: isReactionPlayable ? false : playConfigForCard.needsTarget,
+      usesWeaponRange: playConfigForCard.usesWeaponRange,
+      panicDistance: playConfigForCard.panicDistance,
+      targetTableCardMode: playConfigForCard.targetTableCardMode,
+      disposable: playConfigForCard.disposable,
+      effectLimitKey: playConfigForCard.effectLimitKey,
+      propertyAction: playConfigForCard.propertyAction,
+      propertyEffectLimitKey: playConfigForCard.propertyEffectLimitKey,
+      propertyCharges: playConfigForCard.propertyCharges,
+      propertyLabel: playConfigForCard.propertyLabel,
+      weaponRange: playConfigForCard.weaponRange,
+      statusImage: playConfigForCard.statusImage,
+      check: playConfigForCard.check,
+      rangeStatusBonus: playConfigForCard.rangeStatusBonus,
+      distanceModifierFromSelf: playConfigForCard.distanceModifierFromSelf,
+      distanceModifierToSelf: playConfigForCard.distanceModifierToSelf,
       suit: card.suit,
       rank: card.rank,
     };
@@ -157,8 +241,12 @@ export function createPublicStateSerializer(dependencies) {
     return {
       ...publicCard,
       isPlayable:
-        isReactionPlayable || isCardPlayable(room, player, configForCard),
-      isBlockedByTurnRule: isCardBlockedByTurnRule(room, player, configForCard),
+        isReactionPlayable || isCardPlayable(room, player, playConfigForCard),
+      isBlockedByTurnRule: isCardBlockedByTurnRule(
+        room,
+        player,
+        playConfigForCard,
+      ),
     };
   }
 

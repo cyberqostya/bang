@@ -43,9 +43,10 @@ const { freezeLeavingCard } = useCardLeaveAnimation();
 const canActivateWeaponProperty = computed(
   () =>
     props.canActivate ??
-    (Boolean(weapon.value?.propertyAction) &&
+    (roomStore.isPayingCharacterAbility ||
+      (Boolean(weapon.value?.propertyAction) &&
       roomStore.isMyTurn &&
-      !isReactionActive.value),
+      !isReactionActive.value)),
 );
 const isWeaponPropertyActive = computed(() => {
   if (props.isAttention !== undefined) return props.isAttention;
@@ -59,6 +60,13 @@ const isWeaponPropertyActive = computed(() => {
 
 function handleWeaponTap() {
   if (!canActivateWeaponProperty.value) return;
+
+  if (props.canActivate === undefined && roomStore.isPayingCharacterAbility) {
+    roomStore.selectCharacterPaymentCard({
+      source: "weapon",
+    });
+    return;
+  }
 
   emit("activate", weapon.value);
 
@@ -101,6 +109,14 @@ function freezeLeavingWeapon(element) {
         class="weapon-slot__card"
         :card="weapon"
         :is-attention="isWeaponPropertyActive"
+        :is-discarding="
+          props.canActivate === undefined && roomStore.isPayingCharacterAbility
+        "
+        :mark="
+          props.canActivate === undefined && roomStore.isPayingCharacterAbility
+            ? 'discard'
+            : ''
+        "
         @activate="handleWeaponTap"
         @preview="openPreview"
       />

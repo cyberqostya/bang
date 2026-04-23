@@ -68,6 +68,16 @@ export const useRoomStore = defineStore("room", () => {
   const hasOwnTurnCheck = computed(
     () => room.value.game?.turnCheck?.playerId === playerId.value,
   );
+  const ownCharacterPayment = computed(() => {
+    const payment = room.value.game?.pendingCharacterPayment || null;
+
+    return payment?.playerId === playerId.value ? payment : null;
+  });
+  const isPayingCharacterAbility = computed(
+    () =>
+      Boolean(ownCharacterPayment.value) ||
+      ownPlayer.value?.activeCharacterAbility?.effect === "discardCardsToHeal",
+  );
   const selectedCard = computed(
     () =>
       ownHand.value.find((card) => card.instanceId === selectedCardId.value) ||
@@ -216,6 +226,14 @@ export const useRoomStore = defineStore("room", () => {
   }
 
   function selectCard(cardInstanceId) {
+    if (isPayingCharacterAbility.value) {
+      selectCharacterPaymentCard({
+        source: "hand",
+        cardInstanceId,
+      });
+      return;
+    }
+
     if (isDiscardingCards.value) {
       discardCard(cardInstanceId);
       return;
@@ -288,6 +306,12 @@ export const useRoomStore = defineStore("room", () => {
     });
   }
 
+  function activateCharacterAbility() {
+    send("game:action", {
+      action: "activateCharacterAbility",
+    });
+  }
+
   function checkBarrel() {
     send("game:action", {
       action: "checkBarrel",
@@ -308,6 +332,33 @@ export const useRoomStore = defineStore("room", () => {
       action: "chooseGeneralStoreCard",
       cardInstanceId,
     });
+  }
+
+  function chooseCheckCard(cardInstanceId) {
+    send("game:action", {
+      action: "chooseCheckCard",
+      cardInstanceId,
+    });
+  }
+
+  function selectCharacterPaymentCard(payload) {
+    send("game:action", {
+      action: "selectCharacterPaymentCard",
+      ...payload,
+    });
+  }
+
+  function cancelCharacterPayment() {
+    send("game:action", {
+      action: "cancelCharacterPayment",
+    });
+  }
+
+  function cancelTurnDiscard() {
+    send("game:action", {
+      action: "cancelTurnDiscard",
+    });
+    isDiscardingCards.value = false;
   }
 
   function startDiscardingCards() {
@@ -413,6 +464,11 @@ export const useRoomStore = defineStore("room", () => {
   }
 
   function syncDiscardMode() {
+    if (room.value.game?.pendingTurnDiscard?.playerId === playerId.value) {
+      isDiscardingCards.value = true;
+      return;
+    }
+
     if (!isDiscardingCards.value) return;
 
     if (!mustDiscardCards.value) {
@@ -469,9 +525,11 @@ export const useRoomStore = defineStore("room", () => {
     isHost,
     isDiscardingCards,
     isMyTurn,
+    isPayingCharacterAbility,
     isSeated,
     ownPlayer,
     ownHand,
+    ownCharacterPayment,
     mustDiscardCards,
     playerId,
     players,
@@ -482,9 +540,13 @@ export const useRoomStore = defineStore("room", () => {
     screen,
     wsUrl,
     cancelSelectedCard,
+    cancelCharacterPayment,
+    cancelTurnDiscard,
+    activateCharacterAbility,
     activateWeaponProperty,
     checkBarrel,
     checkTurnBlueCard,
+    chooseCheckCard,
     chooseGeneralStoreCard,
     closeRoom,
     connect,
@@ -499,6 +561,7 @@ export const useRoomStore = defineStore("room", () => {
     openOwnRoom,
     reconnect,
     selectCard,
+    selectCharacterPaymentCard,
     startGame,
     startDiscardingCards,
     takeSeat,

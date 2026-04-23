@@ -21,6 +21,9 @@ const isOwnReactionTarget = computed(() => {
       pendingReaction?.targetPlayerIds?.includes(roomStore.playerId),
   );
 });
+const isOwnCheckChoicePicker = computed(
+  () => roomStore.room.game?.pendingCheckChoice?.playerId === roomStore.playerId,
+);
 const shouldReturnFromCardsToGame = computed(
   () =>
     isCardsRoute.value &&
@@ -28,6 +31,7 @@ const shouldReturnFromCardsToGame = computed(
     (roomStore.isMyTurn ||
       roomStore.isDiscardingCards ||
       roomStore.room.game?.generalStore ||
+      isOwnCheckChoicePicker.value ||
       roomStore.hasOwnTurnCheck ||
       isOwnReactionTarget.value),
 );

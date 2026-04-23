@@ -25,7 +25,8 @@ export function isDynamiteInPlay(players) {
 }
 
 export function getPlayerDistance(seats, fromPlayerId, toPlayerId, options = {}) {
-  const { getCardConfig = () => null } = options;
+  const { getCardConfig = () => null, getCharacterConfig = () => null } =
+    options;
   const aliveSeatIndexes = getAliveSeatIndexes(seats);
   const fromSeat = findActiveSeatByPlayerId(seats, fromPlayerId);
   const toSeat = findActiveSeatByPlayerId(seats, toPlayerId);
@@ -46,24 +47,51 @@ export function getPlayerDistance(seats, fromPlayerId, toPlayerId, options = {})
     aliveSeatIndexes.length - directDistance,
   );
   const distanceModifier =
-    getDistanceModifierFromSelf(fromSeat.player, getCardConfig) +
-    getDistanceModifierToSelf(toSeat.player, getCardConfig);
+    getDistanceModifierFromSelf(
+      fromSeat.player,
+      getCardConfig,
+      getCharacterConfig,
+    ) +
+    getDistanceModifierToSelf(
+      toSeat.player,
+      getCardConfig,
+      getCharacterConfig,
+    );
 
   return Math.max(1, baseDistance + distanceModifier);
 }
 
-export function getDistanceModifierFromSelf(player, getCardConfig = () => null) {
-  return getBlueCardsValue(player, "distanceModifierFromSelf", getCardConfig);
+export function getDistanceModifierFromSelf(
+  player,
+  getCardConfig = () => null,
+  getCharacterConfig = () => null,
+) {
+  return (
+    getBlueCardsValue(player, "distanceModifierFromSelf", getCardConfig) +
+    getCharacterValue(player, "distanceModifierFromSelf", getCharacterConfig)
+  );
 }
 
-export function getDistanceModifierToSelf(player, getCardConfig = () => null) {
-  return getBlueCardsValue(player, "distanceModifierToSelf", getCardConfig);
+export function getDistanceModifierToSelf(
+  player,
+  getCardConfig = () => null,
+  getCharacterConfig = () => null,
+) {
+  return (
+    getBlueCardsValue(player, "distanceModifierToSelf", getCardConfig) +
+    getCharacterValue(player, "distanceModifierToSelf", getCharacterConfig)
+  );
 }
 
-export function getRangeStatusValue(player, getCardConfig = () => null) {
+export function getRangeStatusValue(
+  player,
+  getCardConfig = () => null,
+  getCharacterConfig = () => null,
+) {
   return (
     (player?.attackRange || 1) +
-    getBlueCardsValue(player, "rangeStatusBonus", getCardConfig)
+    getBlueCardsValue(player, "rangeStatusBonus", getCardConfig) +
+    getCharacterValue(player, "rangeStatusBonus", getCharacterConfig)
   );
 }
 
@@ -79,4 +107,10 @@ function getBlueCardsValue(player, propertyName, getCardConfig) {
 
     return total + (card[propertyName] || config[propertyName] || 0);
   }, 0);
+}
+
+function getCharacterValue(player, propertyName, getCharacterConfig) {
+  const character = player?.character || getCharacterConfig(player) || {};
+
+  return character[propertyName] || 0;
 }

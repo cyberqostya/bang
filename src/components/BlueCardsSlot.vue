@@ -32,6 +32,14 @@ const canCheckTurnCard = computed(
 const { freezeLeavingCard } = useCardLeaveAnimation();
 
 function handleCardTap(card) {
+  if (roomStore.isPayingCharacterAbility) {
+    roomStore.selectCharacterPaymentCard({
+      source: "blue",
+      cardInstanceId: card.instanceId,
+    });
+    return;
+  }
+
   if (roomStore.isDiscardingCards) return;
 
   if (
@@ -75,6 +83,7 @@ function closePreview() {
         :key="card.instanceId"
         :card="card"
         :is-attention="card.instanceId === turnCheck?.cardInstanceId"
+        :is-discarding="roomStore.isPayingCharacterAbility"
         @preview="openPreview"
         @select="handleCardTap(card)"
       />

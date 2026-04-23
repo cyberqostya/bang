@@ -4,6 +4,10 @@ import CardPreview from "./CardPreview.vue";
 import GameCardButton from "./GameCardButton.vue";
 
 defineProps({
+  ariaLabel: {
+    type: String,
+    default: "Выбор карты",
+  },
   cards: {
     type: Array,
     default: () => [],
@@ -28,13 +32,13 @@ function closePreview() {
 
 <template>
   <div
-    class="general-store-dialog"
+    class="card-choice-dialog"
     role="dialog"
     aria-modal="true"
-    aria-label="Магазин"
+    :aria-label="ariaLabel"
     @click.stop
   >
-    <div class="general-store-dialog__cards">
+    <div class="card-choice-dialog__cards">
       <GameCardButton
         v-for="card in cards"
         :key="card.instanceId"
@@ -49,7 +53,7 @@ function closePreview() {
 </template>
 
 <style scoped>
-.general-store-dialog {
+.card-choice-dialog {
   position: fixed;
   inset: 0;
   z-index: 45;
@@ -59,7 +63,7 @@ function closePreview() {
   background: rgba(29, 29, 29, 0.62);
 }
 
-.general-store-dialog__cards {
+.card-choice-dialog__cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, var(--card-width));
   gap: 8px;

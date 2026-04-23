@@ -70,7 +70,7 @@ function openCard() {
 }
 
 .event-card-link_static {
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
 }
 </style>

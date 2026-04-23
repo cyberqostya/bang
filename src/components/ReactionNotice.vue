@@ -57,10 +57,14 @@ const progressStyle = computed(() =>
 const shouldShowCount = computed(() => !isCheckMode.value);
 const noticeClass = computed(() => ({
   "reaction-notice_general-store": isGeneralStoreMode.value,
+  "reaction-notice_no-count": !shouldShowCount.value,
 }));
 const shouldShowReactionHint = computed(
   () =>
     !isCheckMode.value && !isGeneralStoreMode.value && props.isReactionTarget,
+);
+const reactionModifierTitle = computed(
+  () => props.pendingReaction?.reactionModifier?.characterTitle || "",
 );
 const shouldShowBarrelCheckFailure = computed(
   () => shouldShowReactionHint.value && props.barrelCheckFailure,
@@ -105,6 +109,13 @@ const shouldShowBarrelCheckFailure = computed(
 
       <p v-if="shouldShowReactionHint" class="reaction-notice__subtext">
         До потери здоровья осталось ->
+      </p>
+
+      <p v-if="reactionModifierTitle" class="reaction-notice__subtext">
+        <span>Модификатор </span>
+        <span class="reaction-notice__character">
+          {{ reactionModifierTitle }}
+        </span>
       </p>
 
       <p
@@ -169,6 +180,10 @@ const shouldShowBarrelCheckFailure = computed(
   align-items: center;
 }
 
+.reaction-notice_no-count {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .reaction-notice__progress {
   position: absolute;
   left: 0;
@@ -199,6 +214,11 @@ const shouldShowBarrelCheckFailure = computed(
 .reaction-notice__card {
   font-weight: 800;
   white-space: nowrap;
+}
+
+.reaction-notice__character {
+  color: #7500f1;
+  font-weight: 700;
 }
 
 .reaction-notice__subtext {

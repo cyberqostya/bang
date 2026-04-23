@@ -11,7 +11,7 @@ import CardPreview from "../components/CardPreview.vue";
 import GameEventMessage from "../components/GameEventMessage.vue";
 import GamePlayersTable from "../components/GamePlayersTable.vue";
 import GameCardButton from "../components/GameCardButton.vue";
-import GeneralStoreDialog from "../components/GeneralStoreDialog.vue";
+import CardChoiceDialog from "../components/CardChoiceDialog.vue";
 import PlayerCardsView from "../components/PlayerCardsView.vue";
 import PlayerTableZone from "../components/PlayerTableZone.vue";
 import ReactionNotice from "../components/ReactionNotice.vue";
@@ -34,6 +34,7 @@ const turnCheckNoticeStartedAt = ref(0);
 const isDeathNoticeAccepted = ref(false);
 const activePhaseIndex = ref(0);
 const wasDiscardingCards = ref(false);
+const isTurnDiscardCancelPending = ref(false);
 const wasReactionParticipant = ref(false);
 const lastShownTurnCheckEventId = ref("");
 const reactionNow = ref(Date.now());
@@ -157,6 +158,42 @@ const generalStoreNoticeText = computed(() =>
     ? "Выбери карту"
     : `Выбирает ${generalStoreCurrentPickerLabel.value}`,
 );
+const pendingCheckChoice = computed(
+  () => roomStore.room.game?.pendingCheckChoice || null,
+);
+const isCheckChoiceCurrentPicker = computed(
+  () => pendingCheckChoice.value?.playerId === roomStore.playerId,
+);
+const checkChoiceCountdown = computed(() => {
+  if (!pendingCheckChoice.value?.expiresAt) return 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      Math.ceil(timingConfig.checkChoiceWindowMs / 1000),
+      Math.ceil((pendingCheckChoice.value.expiresAt - reactionNow.value) / 1000),
+    ),
+  );
+});
+const checkChoiceProgressStyle = computed(() => {
+  if (!pendingCheckChoice.value?.expiresAt) {
+    return { transform: "scaleX(0)" };
+  }
+
+  const ratio = Math.max(
+    0,
+    Math.min(
+      1,
+      (pendingCheckChoice.value.expiresAt - reactionNow.value) /
+        timingConfig.checkChoiceWindowMs,
+    ),
+  );
+
+  return { transform: `scaleX(${ratio})` };
+});
+const checkChoiceNoticeText = computed(() =>
+  isCheckChoiceCurrentPicker.value ? "Выбери карту проверки" : "Выбирает карту проверки",
+);
 const canFinishGameRoom = computed(
   () => Boolean(roomStore.room.game?.winnerText) && finishDelayLeft.value === 0,
 );
@@ -164,6 +201,7 @@ const canUseDrawPhase = computed(
   () =>
     roomStore.isMyTurn &&
     !isOwnTurnCheck.value &&
+    !roomStore.isPayingCharacterAbility &&
     !roomStore.room.game?.turnDrawTaken &&
     !roomStore.room.game?.turnActionTaken,
 );
@@ -172,6 +210,7 @@ const isPlayPhaseDisabled = computed(
     !roomStore.isMyTurn ||
     isOwnTurnCheck.value ||
     roomStore.isDiscardingCards ||
+    roomStore.isPayingCharacterAbility ||
     activePhaseIndex.value > 0 ||
     Boolean(roomStore.room.game?.turnActionTaken),
 );
@@ -179,7 +218,9 @@ const isOwnTurnCheck = computed(
   () => roomStore.room.game?.turnCheck?.playerId === roomStore.playerId,
 );
 const isHeaderSwitchDisabled = computed(
-  () => viewMode.value === "cards" && roomStore.isDiscardingCards,
+  () =>
+    viewMode.value === "cards" &&
+    (roomStore.isDiscardingCards || roomStore.isPayingCharacterAbility),
 );
 const shouldShowDeathNotice = computed(
   () =>
@@ -276,6 +317,7 @@ watch(
 
     if (turnPlayerId !== roomStore.playerId) return;
 
+    inspectedPlayerId.value = "";
     viewMode.value = "cards";
     roomStore.cancelSelectedCard();
     activePhaseIndex.value = 0;
@@ -287,8 +329,16 @@ watch(
 watch(
   () => roomStore.isDiscardingCards,
   (isDiscardingCards) => {
-    if (wasDiscardingCards.value && !isDiscardingCards) {
+    if (
+      wasDiscardingCards.value &&
+      !isDiscardingCards &&
+      !isTurnDiscardCancelPending.value
+    ) {
       viewMode.value = "players";
+    }
+
+    if (!isDiscardingCards) {
+      isTurnDiscardCancelPending.value = false;
     }
 
     wasDiscardingCards.value = isDiscardingCards;
@@ -330,6 +380,7 @@ watch(
       isReactionTarget.value || isReactionActor.value;
 
     if (isReactionTarget.value) {
+      inspectedPlayerId.value = "";
       viewMode.value = "cards";
       roomStore.cancelSelectedCard();
     } else if (
@@ -349,12 +400,12 @@ watch(
 );
 
 watch(
-  () => generalStore.value?.id || "",
-  (generalStoreId) => {
+  () => [generalStore.value?.id || "", pendingCheckChoice.value?.id || ""].join(":"),
+  (choiceKey) => {
     window.clearInterval(generalStoreCountdownTimer);
     generalStoreCountdownTimer = null;
 
-    if (!generalStoreId) return;
+    if (!choiceKey.replace(":", "")) return;
 
     roomStore.cancelSelectedCard();
     selectedActionPreviewCard.value = null;
@@ -515,6 +566,17 @@ function formatMessageTime(timestamp) {
 }
 
 function handleDiscardPhase() {
+  if (roomStore.isPayingCharacterAbility) {
+    roomStore.cancelCharacterPayment();
+    return;
+  }
+
+  if (roomStore.isDiscardingCards) {
+    isTurnDiscardCancelPending.value = true;
+    roomStore.cancelTurnDiscard();
+    return;
+  }
+
   if (!roomStore.isMyTurn || isOwnTurnCheck.value) return;
 
   activePhaseIndex.value = 2;
@@ -578,6 +640,12 @@ function chooseGeneralStoreCard(cardInstanceId) {
   if (!isGeneralStoreCurrentPicker.value) return;
 
   roomStore.chooseGeneralStoreCard(cardInstanceId);
+}
+
+function chooseCheckCard(cardInstanceId) {
+  if (!isCheckChoiceCurrentPicker.value) return;
+
+  roomStore.chooseCheckCard(cardInstanceId);
 }
 </script>
 
@@ -687,13 +755,18 @@ function chooseGeneralStoreCard(cardInstanceId) {
             size="phase"
             type="button"
             :disabled="
-              !roomStore.isMyTurn ||
-              roomStore.isDiscardingCards ||
-              isOwnTurnCheck
+              !roomStore.isPayingCharacterAbility &&
+              !roomStore.isDiscardingCards &&
+              (!roomStore.isMyTurn ||
+                isOwnTurnCheck)
             "
             @click.stop="handleDiscardPhase"
           >
-            Сброс
+            {{
+              roomStore.isPayingCharacterAbility || roomStore.isDiscardingCards
+                ? "Отмена"
+                : "Сброс"
+            }}
           </AppButton>
         </div>
       </PlayZone>
@@ -784,11 +857,20 @@ function chooseGeneralStoreCard(cardInstanceId) {
       </form>
     </div>
 
-    <GeneralStoreDialog
+    <CardChoiceDialog
       v-if="generalStore"
+      aria-label="Магазин"
       :cards="generalStore.cards"
       :is-current-picker="isGeneralStoreCurrentPicker"
       @choose="chooseGeneralStoreCard"
+    />
+
+    <CardChoiceDialog
+      v-if="pendingCheckChoice"
+      aria-label="Выбор карты проверки"
+      :cards="pendingCheckChoice.cards"
+      :is-current-picker="isCheckChoiceCurrentPicker"
+      @choose="chooseCheckCard"
     />
 
     <Transition name="reaction-notice">
@@ -801,9 +883,19 @@ function chooseGeneralStoreCard(cardInstanceId) {
       />
     </Transition>
 
+    <Transition name="reaction-notice">
+      <ReactionNotice
+        v-if="pendingCheckChoice"
+        mode="general-store"
+        :reaction-actor-prompt="checkChoiceNoticeText"
+        :reaction-countdown="checkChoiceCountdown"
+        :reaction-progress-style="checkChoiceProgressStyle"
+      />
+    </Transition>
+
     <Transition name="reaction-notice" mode="out-in">
       <ReactionNotice
-        v-if="shouldShowReactionOverlay"
+        v-if="shouldShowReactionOverlay && !pendingCheckChoice"
         :key="pendingReaction?.id"
         :barrel-check-failure="barrelCheckFailure"
         :is-reaction-target="isReactionTarget"

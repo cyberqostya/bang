@@ -17,6 +17,7 @@ export const config = {
   emptyRoomGraceMs: 0,
   finishedRoomGraceMs: 60 * 1000,
   generalStorePickWindowMs: timingConfig.generalStorePickWindowMs,
+  checkChoiceWindowMs: timingConfig.checkChoiceWindowMs,
   reactionWindowMs: timingConfig.reactionWindowMs,
   turnCheckNoticeMs: timingConfig.turnCheckNoticeMs,
   gameTtlMs: 2 * 60 * 60 * 1000,

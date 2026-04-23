@@ -1,7 +1,72 @@
+<script setup>
+import { computed, ref } from "vue";
+import { useRoomStore } from "../stores/roomStore.js";
+import CardPreview from "./CardPreview.vue";
+import GameCardButton from "./GameCardButton.vue";
+
+const props = defineProps({
+  character: {
+    type: Object,
+    default: undefined,
+  },
+});
+
+const roomStore = useRoomStore();
+const previewCharacter = ref(null);
+const character = computed(() =>
+  props.character === undefined
+    ? roomStore.ownPlayer?.character || null
+    : props.character,
+);
+const isOwnCharacter = computed(() => props.character === undefined);
+const isCharacterAbilityActive = computed(
+  () =>
+    isOwnCharacter.value &&
+    roomStore.ownPlayer?.activeCharacterAbility?.characterId ===
+      character.value?.id,
+);
+const canActivateCharacter = computed(
+  () =>
+    isOwnCharacter.value &&
+    character.value?.ability?.trigger === "activate" &&
+    roomStore.ownPlayer?.isAlive !== false,
+);
+
+function handleActivate() {
+  if (!canActivateCharacter.value) return;
+
+  roomStore.activateCharacterAbility();
+}
+
+function openPreview(card) {
+  previewCharacter.value = card;
+}
+
+function closePreview() {
+  previewCharacter.value = null;
+}
+</script>
+
 <template>
-  <div class="character-slot" aria-label="Персонаж">
+  <div v-if="!character" class="character-slot" aria-label="Персонаж">
     <img src="/images/chars.webp" alt="" />
   </div>
+
+  <GameCardButton
+    v-else
+    class="character-slot__card"
+    :card="character"
+    :is-aria-disabled="!canActivateCharacter"
+    :is-attention="isCharacterAbilityActive"
+    @activate="handleActivate"
+    @preview="openPreview"
+  />
+
+  <CardPreview
+    v-if="previewCharacter"
+    :card="previewCharacter"
+    @close="closePreview"
+  />
 </template>
 
 <style scoped>
@@ -23,5 +88,13 @@
   height: auto;
   opacity: 0.88;
   object-fit: contain;
+}
+
+.character-slot__card {
+  flex: 0 0 var(--card-width);
+}
+
+.character-slot__card[aria-disabled="false"] {
+  cursor: pointer;
 }
 </style>

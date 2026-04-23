@@ -14,6 +14,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  character: {
+    type: Object,
+    default: undefined,
+  },
   roleCanOpen: {
     type: Boolean,
     default: true,
@@ -49,7 +53,7 @@ const weaponSlotProps = computed(() => {
   <PlayZone title="Планшет игрока" variant="table">
     <div class="table-main">
       <slot name="lead" />
-      <CharacterSlot />
+      <CharacterSlot :character="character" />
       <div class="table-cards">
         <WeaponSlot
           v-bind="weaponSlotProps"
