@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { useRoomStore } from "../stores/roomStore.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 import CardPreview from "./CardPreview.vue";
 import GameCardButton from "./GameCardButton.vue";
 
@@ -49,7 +50,7 @@ function closePreview() {
 
 <template>
   <div v-if="!character" class="character-slot" aria-label="Персонаж">
-    <img src="/images/chars.webp" alt="" />
+    <img :src="resolveAssetUrl('/images/chars.webp')" alt="" />
   </div>
 
   <GameCardButton

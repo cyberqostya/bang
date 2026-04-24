@@ -7,6 +7,7 @@ import {
   hasBlueCardInPlay,
   isDynamiteInPlay,
 } from "../../shared/gameRules.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const STATUS_ARC_STEP_DEGREES = 30;
 
@@ -51,15 +52,15 @@ export function useGameTable(roomStore, emit) {
   });
 
   function getHatImage(player) {
-    return `/images/hats/${player.hatSkinKey || "1"}.webp`;
+    return resolveAssetUrl(`/images/hats/${player.hatSkinKey || "1"}.webp`);
   }
 
   function getBulletImage(player) {
     if (player.bulletSkinKey === "sheriff") {
-      return healthConfig.sheriffBulletImage;
+      return resolveAssetUrl(healthConfig.sheriffBulletImage);
     }
 
-    return healthConfig.tableBulletImage;
+    return resolveAssetUrl(healthConfig.tableBulletImage);
   }
 
   function isSheriff(player) {

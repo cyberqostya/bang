@@ -9,6 +9,7 @@ import {
 } from "vue";
 import { useGameTable } from "../composables/useGameTable.js";
 import { useRoomStore } from "../stores/roomStore.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const roomStore = useRoomStore();
 const emit = defineEmits(["showCards", "inspectPlayer"]);
@@ -135,7 +136,7 @@ onBeforeUnmount(() => {
           :style="status.style"
           :title="status.title"
         >
-          <img :src="status.image" :alt="status.title" />
+          <img :src="resolveAssetUrl(status.image)" :alt="status.title" />
         </span>
       </span>
       <span

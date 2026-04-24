@@ -9,6 +9,7 @@ import {
 } from "vue";
 import { healthConfig } from "../config/healthConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const props = defineProps({
   player: {
@@ -85,10 +86,12 @@ watch(
 
 function getBulletImage(index) {
   if (displayPlayer.value.bulletSkinKey === "sheriff") {
-    return healthConfig.sheriffBulletImage;
+    return resolveAssetUrl(healthConfig.sheriffBulletImage);
   }
 
-  return healthConfig.bulletImages[index] || healthConfig.bulletImages[0];
+  return resolveAssetUrl(
+    healthConfig.bulletImages[index] || healthConfig.bulletImages[0],
+  );
 }
 
 async function updateBulletMetrics() {

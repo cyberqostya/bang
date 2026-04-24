@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from "vue";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const donationUrl = "https://pay.cloudtips.ru/p/656a5ae1";
 const coinImages = [
@@ -7,7 +8,7 @@ const coinImages = [
   "/images/coins/2.webp",
   "/images/coins/3.webp",
   "/images/coins/4.webp",
-];
+].map(resolveAssetUrl);
 const coinIndex = ref(0);
 const isFlipping = ref(false);
 

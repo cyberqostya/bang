@@ -1,4 +1,6 @@
 <script setup>
+import { resolveAssetUrl } from "../utils/assets.js";
+
 defineProps({
   card: {
     type: Object,
@@ -9,14 +11,18 @@ defineProps({
 
 <template>
   <span class="game-card-visual">
-    <img class="game-card-visual__image" :src="card.image" :alt="card.title" />
+    <img
+      class="game-card-visual__image"
+      :src="resolveAssetUrl(card.image)"
+      :alt="card.title"
+    />
     <span v-if="card.rank && card.suit" class="game-card-visual__corner">
       <span class="game-card-visual__rank" :style="{ color: card.suit.color }">
         {{ card.rank.label }}
       </span>
       <img
         class="game-card-visual__suit"
-        :src="card.suit.image"
+        :src="resolveAssetUrl(card.suit.image)"
         :alt="card.suit.label"
       />
     </span>

@@ -1,8 +1,6 @@
 ﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import AppHeader from "../components/AppHeader.vue";
 import AppButton from "../components/AppButton.vue";
-import AppScreen from "../components/AppScreen.vue";
 import PlayZone from "../components/PlayZone.vue";
 import BottomPanel from "../components/BottomPanel.vue";
 import BlueCardsSlot from "../components/BlueCardsSlot.vue";
@@ -15,6 +13,7 @@ import CardChoiceDialog from "../components/CardChoiceDialog.vue";
 import PlayerCardsView from "../components/PlayerCardsView.vue";
 import PlayerTableZone from "../components/PlayerTableZone.vue";
 import ReactionNotice from "../components/ReactionNotice.vue";
+import { useAppHeader } from "../composables/useAppHeader.js";
 import { useGameResult } from "../composables/useGameResult.js";
 import { useReactionNotice } from "../composables/useReactionNotice.js";
 import { useRoomStore } from "../stores/roomStore.js";
@@ -172,7 +171,9 @@ const checkChoiceCountdown = computed(() => {
     0,
     Math.min(
       Math.ceil(timingConfig.checkChoiceWindowMs / 1000),
-      Math.ceil((pendingCheckChoice.value.expiresAt - reactionNow.value) / 1000),
+      Math.ceil(
+        (pendingCheckChoice.value.expiresAt - reactionNow.value) / 1000,
+      ),
     ),
   );
 });
@@ -379,7 +380,10 @@ watch(
       reactionNow.value +
       Math.min(
         timingConfig.reactionWindowMs,
-        Math.max(0, pendingReaction.value?.remainingMs ?? timingConfig.reactionWindowMs),
+        Math.max(
+          0,
+          pendingReaction.value?.remainingMs ?? timingConfig.reactionWindowMs,
+        ),
       );
     const wasParticipant = wasReactionParticipant.value;
 
@@ -407,7 +411,10 @@ watch(
 );
 
 watch(
-  () => [generalStore.value?.id || "", pendingCheckChoice.value?.id || ""].join(":"),
+  () =>
+    [generalStore.value?.id || "", pendingCheckChoice.value?.id || ""].join(
+      ":",
+    ),
   (choiceKey) => {
     window.clearInterval(generalStoreCountdownTimer);
     generalStoreCountdownTimer = null;
@@ -456,7 +463,7 @@ function toggleViewMode() {
     roomStore.cancelSelectedCard();
   }
 
-   if (viewMode.value === "players" && roomStore.isSelectingDrawTarget) {
+  if (viewMode.value === "players" && roomStore.isSelectingDrawTarget) {
     roomStore.cancelDrawTargetSelection();
   }
 
@@ -672,34 +679,26 @@ function chooseCheckCard(cardInstanceId) {
 
   roomStore.chooseCheckCard(cardInstanceId);
 }
+
+useAppHeader(
+  computed(() => ({
+    leftButton: {
+      label: "Выход",
+      variant: "muted",
+      onClick: openLeaveGameDialog,
+    },
+    rightButton: {
+      label: viewMode.value === "cards" ? "К игрокам" : "К картам",
+      variant: "muted",
+      disabled: isHeaderSwitchDisabled.value,
+      onClick: toggleViewMode,
+    },
+  })),
+);
 </script>
 
 <template>
-  <AppScreen class="game-screen">
-    <AppHeader>
-      <template #left>
-        <AppButton
-          variant="muted"
-          size="header"
-          type="button"
-          @click.stop="openLeaveGameDialog"
-        >
-          Выход
-        </AppButton>
-      </template>
-      <template #right>
-        <AppButton
-          variant="muted"
-          size="header"
-          type="button"
-          :disabled="isHeaderSwitchDisabled"
-          @click.stop="toggleViewMode"
-        >
-          {{ viewMode === "cards" ? "К игрокам" : "К картам" }}
-        </AppButton>
-      </template>
-    </AppHeader>
-
+  <div class="game-screen">
     <section v-if="viewMode === 'players'" class="players-view">
       <PlayZone title="Журнал событий" variant="events">
         <div
@@ -782,8 +781,7 @@ function chooseCheckCard(cardInstanceId) {
             :disabled="
               !roomStore.isPayingCharacterAbility &&
               !roomStore.isDiscardingCards &&
-              (!roomStore.isMyTurn ||
-                isOwnTurnCheck)
+              (!roomStore.isMyTurn || isOwnTurnCheck)
             "
             @click.stop="handleDiscardPhase"
           >
@@ -988,15 +986,24 @@ function chooseCheckCard(cardInstanceId) {
       :card="selectedActionPreviewCard"
       @close="closeSelectedActionPreview"
     />
-  </AppScreen>
+  </div>
 </template>
 
 <style scoped>
+.game-screen {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
 .cards-view {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
 .cards-view :deep(.play-zone_table) {

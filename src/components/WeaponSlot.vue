@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { useCardLeaveAnimation } from "../composables/useCardLeaveAnimation.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 import CardPreview from "./CardPreview.vue";
 import GameCardButton from "./GameCardButton.vue";
 import { useRoomStore } from "../stores/roomStore.js";
@@ -121,7 +122,11 @@ function freezeLeavingWeapon(element) {
         @preview="openPreview"
       />
       <span v-else key="default-weapon" class="weapon-slot__default">
-        <img class="weapon-slot__weapon" src="/images/colt.webp" alt="" />
+        <img
+          class="weapon-slot__weapon"
+          :src="resolveAssetUrl('/images/colt.webp')"
+          alt=""
+        />
         <span class="weapon-slot__range" aria-hidden="true">
           <span>{{ attackRange }}</span>
         </span>

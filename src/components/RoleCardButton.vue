@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { roleBackImage, roleConfig } from "../config/roleConfig.js";
 import { useRoomStore } from "../stores/roomStore.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const props = defineProps({
   canOpen: {
@@ -60,7 +61,7 @@ function closeRole() {
     aria-label="Посмотреть роль"
     @click.stop="openRole(canOpen)"
   >
-    <img :src="roleImage" alt="" />
+    <img :src="resolveAssetUrl(roleImage)" alt="" />
   </button>
 
   <div
@@ -75,10 +76,14 @@ function closeRole() {
       @click.stop="closeRole"
     >
       <span class="role-card-preview__inner">
-        <img class="role-card-preview__back" :src="roleBackImage" alt="" />
+        <img
+          class="role-card-preview__back"
+          :src="resolveAssetUrl(roleBackImage)"
+          alt=""
+        />
         <img
           class="role-card-preview__front"
-          :src="role?.image"
+          :src="resolveAssetUrl(role?.image)"
           :alt="role?.label"
         />
       </span>

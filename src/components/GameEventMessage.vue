@@ -1,5 +1,6 @@
 <script setup>
 import GameEventCardTitle from "./GameEventCardTitle.vue";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const props = defineProps({
   event: {
@@ -230,7 +231,7 @@ function openCard(cardId) {
         </span>
         <img
           class="game-event-message__check-suit"
-          :src="event.drawnCard?.suit?.image"
+          :src="resolveAssetUrl(event.drawnCard?.suit?.image)"
           :alt="event.drawnCard?.suit?.label"
         />
       </span>

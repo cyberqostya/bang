@@ -307,6 +307,7 @@ export function startGameServer() {
     send(client.socket, "room:update", {
       room: getPublicRoom(room, client.playerId),
     });
+    broadcastRoom(room.id);
     broadcastRoomList();
   }
 
@@ -752,12 +753,7 @@ export function startGameServer() {
       )
     ) {
       if (
-        !drawCardsWithOpponentHand(
-          client,
-          room,
-          actor,
-          payload.targetPlayerId,
-        )
+        !drawCardsWithOpponentHand(client, room, actor, payload.targetPlayerId)
       ) {
         broadcastRoom(room.id);
         return;
@@ -774,7 +770,11 @@ export function startGameServer() {
       drawCardsWithSecondCardSuitBonus(room, actor);
       clearActiveCharacterAbility(room, actor.playerId);
     } else if (
-      hasActiveCharacterAbilityEffect(room, actor.playerId, "chooseDeckTopCards")
+      hasActiveCharacterAbilityEffect(
+        room,
+        actor.playerId,
+        "chooseDeckTopCards",
+      )
     ) {
       if (!startDeckTopChoice(room, actor)) {
         broadcastRoom(room.id);
@@ -925,7 +925,11 @@ export function startGameServer() {
         client.playerId,
         configForCard.effectLimitKey,
       ) &&
-      hasCharacterEffectLimitAllowance(room, actor, configForCard.effectLimitKey);
+      hasCharacterEffectLimitAllowance(
+        room,
+        actor,
+        configForCard.effectLimitKey,
+      );
     const usesEffectAllowance =
       configForCard?.effectLimitKey &&
       hasTurnEffectBeenPlayed(
@@ -957,7 +961,11 @@ export function startGameServer() {
         client.playerId,
         configForCard.effectLimitKey,
       ) &&
-      !hasCharacterEffectLimitAllowance(room, actor, configForCard.effectLimitKey)
+      !hasCharacterEffectLimitAllowance(
+        room,
+        actor,
+        configForCard.effectLimitKey,
+      )
     ) {
       sendError(client.socket, "Эту карту уже играли в этот ход");
       return;
@@ -1597,7 +1605,9 @@ export function startGameServer() {
       return;
     }
 
-    if (hasActiveCharacterAbilityEffect(room, actor.playerId, "unlockBangLimit")) {
+    if (
+      hasActiveCharacterAbilityEffect(room, actor.playerId, "unlockBangLimit")
+    ) {
       clearActiveCharacterAbility(room, actor.playerId);
     }
 
@@ -2052,7 +2062,10 @@ export function startGameServer() {
   function drawCardsWithOpponentHand(client, room, actor, targetPlayerId) {
     const normalizedTargetPlayerId = normalizePlayerId(targetPlayerId);
 
-    if (!normalizedTargetPlayerId || normalizedTargetPlayerId === actor.playerId) {
+    if (
+      !normalizedTargetPlayerId ||
+      normalizedTargetPlayerId === actor.playerId
+    ) {
       sendError(client.socket, "Выберите другого игрока");
       return false;
     }
@@ -2095,10 +2108,7 @@ export function startGameServer() {
   ) {
     const ability = characterConfig[player?.characterId]?.ability;
 
-    if (
-      !player?.isAlive ||
-      ability?.trigger !== "passive"
-    ) {
+    if (!player?.isAlive || ability?.trigger !== "passive") {
       return false;
     }
 
@@ -2957,7 +2967,10 @@ export function startGameServer() {
     )?.player;
     const character = characterConfig[targetPlayer?.characterId];
 
-    if (!targetPlayer || character?.ability?.effect !== "characterBarrelCheck") {
+    if (
+      !targetPlayer ||
+      character?.ability?.effect !== "characterBarrelCheck"
+    ) {
       sendError(client.socket, "У персонажа нет такого свойства");
       return;
     }
@@ -3688,7 +3701,11 @@ export function startGameServer() {
         player.playerId,
         configForCard.effectLimitKey,
       ) ||
-      hasCharacterEffectLimitAllowance(room, player, configForCard.effectLimitKey)
+      hasCharacterEffectLimitAllowance(
+        room,
+        player,
+        configForCard.effectLimitKey,
+      )
     );
   }
 
@@ -3709,7 +3726,11 @@ export function startGameServer() {
         player.playerId,
         configForCard.effectLimitKey,
       ) &&
-      !hasCharacterEffectLimitAllowance(room, player, configForCard.effectLimitKey)
+      !hasCharacterEffectLimitAllowance(
+        room,
+        player,
+        configForCard.effectLimitKey,
+      )
     );
   }
 
@@ -3929,7 +3950,7 @@ export function startGameServer() {
     dealInitialHands(room);
     addGameEvent(
       room,
-      "Раздача ролей завершена. Раздача карт согласно запасу здоровья игроков завершена.",
+      "Случайным образом произошла раздача игровых ролей, персонажей и карт согласно запасу здоровья. Приятной игры.",
     );
   }
 
@@ -4490,7 +4511,10 @@ export function startGameServer() {
   function togglePendingDeckTopChoice(room, card) {
     const pendingCheckChoice = room.game.pendingCheckChoice;
 
-    if (!pendingCheckChoice || pendingCheckChoice.effect !== "chooseDeckTopCards") {
+    if (
+      !pendingCheckChoice ||
+      pendingCheckChoice.effect !== "chooseDeckTopCards"
+    ) {
       return false;
     }
 
@@ -4558,7 +4582,10 @@ export function startGameServer() {
   function resolvePendingDeckTopChoice(room, selectedCardInstanceIds) {
     const pendingCheckChoice = room.game.pendingCheckChoice;
 
-    if (!pendingCheckChoice || pendingCheckChoice.effect !== "chooseDeckTopCards") {
+    if (
+      !pendingCheckChoice ||
+      pendingCheckChoice.effect !== "chooseDeckTopCards"
+    ) {
       return false;
     }
 
@@ -4724,7 +4751,13 @@ export function startGameServer() {
     };
   }
 
-  function addBarrelCheckEvent(room, actor, drawnCard, isSuccess, options = {}) {
+  function addBarrelCheckEvent(
+    room,
+    actor,
+    drawnCard,
+    isSuccess,
+    options = {},
+  ) {
     const checkResult = getBarrelCheckResult(drawnCard, isSuccess, options);
 
     addGameEvent(room, {

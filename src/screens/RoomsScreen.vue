@@ -1,10 +1,10 @@
 ﻿<script setup>
-import { nextTick, ref } from "vue";
-import AppHeader from "../components/AppHeader.vue";
+import { computed, nextTick, ref } from "vue";
 import AppButton from "../components/AppButton.vue";
 import AppInput from "../components/AppInput.vue";
-import AppScreen from "../components/AppScreen.vue";
+import { useAppHeader } from "../composables/useAppHeader.js";
 import { useRoomStore } from "../stores/roomStore.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const roomStore = useRoomStore();
 const createNameInput = ref(null);
@@ -78,7 +78,7 @@ function submitJoinRoom() {
 function getRoomBackground(roomId) {
   const index = getStableRoomAssetIndex(roomId);
 
-  return `url(/images/rooms/${index}.webp)`;
+  return `url("${resolveAssetUrl(`/images/rooms/${index}.webp`)}")`;
 }
 
 function getStableRoomAssetIndex(value) {
@@ -110,24 +110,21 @@ function getRoomStatusText(room) {
     ? `Игра в процессе ${count}`
     : `Идёт набор игроков: ${count}`;
 }
+
+useAppHeader(
+  computed(() => ({
+    leftButton: {
+      label: "Создать",
+      variant: "primary",
+      disabled: !roomStore.isConnected,
+      onClick: openCreateDialog,
+    },
+  })),
+);
 </script>
 
 <template>
-  <AppScreen class="rooms-screen">
-    <AppHeader>
-      <template #left>
-        <AppButton
-          variant="primary"
-          size="header"
-          type="button"
-          :disabled="!roomStore.isConnected"
-          @click="openCreateDialog"
-        >
-          <span>Создать</span>
-        </AppButton>
-      </template>
-    </AppHeader>
-
+  <div class="rooms-screen">
     <section class="rooms-zone" aria-label="Список комнат">
       <div class="rooms-zone__content">
         <button
@@ -143,7 +140,11 @@ function getRoomStatusText(room) {
             <span>{{ room.name }}</span>
             <small>{{ getRoomStatusText(room) }}</small>
           </span>
-          <img class="room-card__enter" src="/images/room-enter.svg" alt="" />
+          <img
+            class="room-card__enter"
+            :src="resolveAssetUrl('/images/room-enter.svg')"
+            alt=""
+          />
         </button>
 
         <button
@@ -270,10 +271,17 @@ function getRoomStatusText(room) {
         </div>
       </form>
     </div>
-  </AppScreen>
+  </div>
 </template>
 
 <style scoped>
+.rooms-screen {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+}
+
 .connection-button {
   height: 100%;
   border: 0;

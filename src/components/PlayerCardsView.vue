@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
+import { resolveAssetUrl } from "../utils/assets.js";
 import BulletStack from "./BulletStack.vue";
 import CardPreview from "./CardPreview.vue";
 import CardStrip from "./CardStrip.vue";
@@ -105,7 +106,7 @@ function takeCard(payload) {
         :disabled="!canTakeCards"
         @click.stop="takeCard({ source: 'hand', handIndex })"
       >
-        <img src="/images/cards/cardback.webp" alt="" />
+        <img :src="resolveAssetUrl('/images/cards/cardback.webp')" alt="" />
       </button>
     </CardStrip>
   </PlayZone>

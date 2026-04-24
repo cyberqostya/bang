@@ -1,8 +1,7 @@
 ﻿<script setup>
-import { nextTick, ref } from "vue";
-import AppHeader from "../components/AppHeader.vue";
+import { computed, nextTick, ref } from "vue";
 import AppButton from "../components/AppButton.vue";
-import AppScreen from "../components/AppScreen.vue";
+import { useAppHeader } from "../composables/useAppHeader.js";
 import { useRoomStore } from "../stores/roomStore.js";
 
 const roomStore = useRoomStore();
@@ -63,47 +62,36 @@ function confirmCloseRoom() {
   roomStore.closeRoom();
   closeCloseRoomDialog();
 }
+
+useAppHeader(
+  computed(() => ({
+    leftButton: roomStore.isHost
+      ? {
+          label: "Закрыть комнату",
+          variant: "muted",
+          disabled: roomStore.isSeated,
+          onClick: openCloseRoomDialog,
+        }
+      : {
+          label: "Выйти",
+          variant: "muted",
+          disabled: roomStore.isSeated,
+          onClick: roomStore.leaveRoom,
+        },
+    rightButton: roomStore.isHost
+      ? {
+          label: "Начать игру",
+          variant: "primary",
+          disabled: !roomStore.canStartGame,
+          onClick: roomStore.startGame,
+        }
+      : null,
+  })),
+);
 </script>
 
 <template>
-  <AppScreen class="seats-screen">
-    <AppHeader>
-      <template #left>
-        <AppButton
-          v-if="roomStore.isHost"
-          variant="muted"
-          size="header"
-          type="button"
-          :disabled="roomStore.isSeated"
-          @click="openCloseRoomDialog"
-        >
-          Закрыть комнату
-        </AppButton>
-        <AppButton
-          v-else
-          variant="muted"
-          size="header"
-          type="button"
-          :disabled="roomStore.isSeated"
-          @click="roomStore.leaveRoom"
-        >
-          Выйти
-        </AppButton>
-      </template>
-      <template #right>
-        <AppButton
-          v-if="roomStore.isHost"
-          variant="primary"
-          size="header"
-          type="button"
-          :disabled="!roomStore.canStartGame"
-          @click="roomStore.startGame"
-        >
-          Начать игру
-        </AppButton>
-      </template>
-    </AppHeader>
-
+  <div class="seats-screen">
     <section class="seat-table" aria-label="Выбор места">
       <div class="seat-table__oval">
         <span>Рассаживайтесь,<br />игроки</span>
@@ -203,18 +191,21 @@ function confirmCloseRoom() {
         </div>
       </form>
     </div>
-  </AppScreen>
+  </div>
 </template>
 
 <style scoped>
 .seats-screen {
-  gap: 10px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
 }
 
 .seat-table {
   position: relative;
+  width: 100%;
   min-height: 0;
-  margin: 5px;
 }
 
 .seat-table__oval {

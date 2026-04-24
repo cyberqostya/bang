@@ -1,9 +1,12 @@
 ﻿<script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import AppHeader from "./components/AppHeader.vue";
+import AppScreen from "./components/AppScreen.vue";
 import CardsScreen from "./screens/CardsScreen.vue";
 import GameScreen from "./screens/GameScreen.vue";
 import RoomsScreen from "./screens/RoomsScreen.vue";
 import SeatsScreen from "./screens/SeatsScreen.vue";
+import { appHeaderState } from "./composables/useAppHeader.js";
 import { useRoomStore } from "./stores/roomStore.js";
 import { getCurrentRoute, navigateTo } from "./utils/navigation.js";
 
@@ -60,11 +63,32 @@ watch(shouldReturnFromCardsToGame, (shouldReturn) => {
 </script>
 
 <template>
-  <CardsScreen
-    v-if="isCardsRoute"
-    :selected-card-id="selectedCatalogCardId"
-  />
-  <RoomsScreen v-else-if="roomStore.screen === 'rooms'" />
-  <SeatsScreen v-else-if="roomStore.screen === 'seats'" />
-  <GameScreen v-else />
+  <div class="app-shell">
+    <AppScreen>
+      <AppHeader
+        :center-text="appHeaderState.centerText"
+        :left-button="appHeaderState.leftButton"
+        :right-button="appHeaderState.rightButton"
+      />
+      <CardsScreen
+        v-if="isCardsRoute"
+        :selected-card-id="selectedCatalogCardId"
+      />
+      <RoomsScreen v-else-if="roomStore.screen === 'rooms'" />
+      <SeatsScreen v-else-if="roomStore.screen === 'seats'" />
+      <GameScreen v-else />
+    </AppScreen>
+  </div>
 </template>
+
+<style scoped>
+.app-shell {
+  position: fixed;
+  inset: 0;
+  width: min(100%, 600px);
+  height: 100dvh;
+  margin-inline: auto;
+  overflow: hidden;
+  background: var(--page-back);
+}
+</style>
