@@ -11,6 +11,16 @@ export function createPublicStateSerializer(dependencies) {
     isReactionCardPlayable,
   } = dependencies;
 
+  function getPublicRoomSummary(room) {
+    return {
+      id: room.id,
+      name: room.name,
+      status: room.status,
+      playersCount: getRoomPlayersCount(room),
+      maxPlayers: room.seats.length,
+    };
+  }
+
   function getPublicRoom(room, viewerPlayerId) {
     return {
       id: room.id,
@@ -253,5 +263,6 @@ export function createPublicStateSerializer(dependencies) {
   return {
     getPublicCard,
     getPublicRoom,
+    getPublicRoomSummary,
   };
 }

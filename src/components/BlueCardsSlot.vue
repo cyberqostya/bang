@@ -22,7 +22,7 @@ const canCheckBarrel = computed(
   () =>
     isReactionTarget.value &&
     ["bang", "gatling"].includes(pendingReaction.value?.sourceAction) &&
-    !pendingReaction.value?.barrelChecks?.[roomStore.playerId],
+    !pendingReaction.value?.barrelCheckUsage?.[roomStore.playerId],
 );
 const canCheckTurnCard = computed(
   () =>

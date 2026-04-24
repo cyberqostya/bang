@@ -25,6 +25,7 @@ import {
 
 const DECK_REFILL_THRESHOLD = 13;
 const DISCARD_VISIBLE_CARDS_COUNT = 5;
+const MAX_GAME_EVENTS = 10;
 
 export function startGameServer() {
   const logger = createLogger("server");
@@ -33,6 +34,9 @@ export function startGameServer() {
   const disconnectTimers = new Map();
   const emptyRoomTimers = new Map();
   const roomCreateAttempts = new Map();
+  const pendingRoomBroadcasts = new Set();
+  let isBroadcastFlushScheduled = false;
+  let shouldBroadcastRoomList = false;
   const wss = new WebSocketServer({ port: config.port });
   const publicState = createPublicStateSerializer({
     roleConfig,
@@ -245,6 +249,7 @@ export function startGameServer() {
     send(client.socket, "room:update", {
       room: getPublicRoom(room, client.playerId),
     });
+    broadcastRoom(room.id);
     broadcastRoomList();
   }
 
@@ -459,6 +464,10 @@ export function startGameServer() {
     });
   }
 
+  function isAutoSeatPlayerName(name = "") {
+    return /^Игрок \d+$/.test(String(name || "").trim());
+  }
+
   function seatWaitingPlayers(room) {
     const waitingPlayerIds = getJoinedPlayerIds(room).filter(
       (playerId) => findSeatIndexByPlayerId(room, playerId) === null,
@@ -500,8 +509,8 @@ export function startGameServer() {
 
     seatWaitingPlayers(room);
 
-    if (getSeatedPlayersCount(room) < 2) {
-      sendError(client.socket, "Нужно минимум два игрока за столом");
+    if (getRoomPlayersCount(room) < 2) {
+      sendError(client.socket, "Нужно минимум два игрока в комнате");
       return;
     }
 
@@ -554,9 +563,7 @@ export function startGameServer() {
       return;
     }
 
-    if (
-      room.game.pendingCharacterPayment
-    ) {
+    if (room.game.pendingCharacterPayment) {
       sendError(client.socket, "Ждем оплату свойства персонажа");
       return;
     }
@@ -634,7 +641,7 @@ export function startGameServer() {
     }
 
     if (payload.action === "drawPhase") {
-      drawPhase(client, room);
+      drawPhase(client, room, payload);
       return;
     }
 
@@ -707,7 +714,7 @@ export function startGameServer() {
     room.game.turnActionTaken = true;
   }
 
-  function drawPhase(client, room) {
+  function drawPhase(client, room, payload = {}) {
     if (hasRequiredTurnCheck(room, client.playerId)) {
       sendError(client.socket, "Сначала проверьте карту на столе");
       return;
@@ -732,8 +739,30 @@ export function startGameServer() {
       return;
     }
 
-    if (hasActiveCharacterAbilityEffect(room, actor.playerId, "drawDiscardTop")) {
+    if (
+      hasActiveCharacterAbilityEffect(room, actor.playerId, "drawDiscardTop")
+    ) {
       drawCardsWithDiscardTop(room, actor);
+      clearActiveCharacterAbility(room, actor.playerId);
+    } else if (
+      hasActiveCharacterAbilityEffect(
+        room,
+        actor.playerId,
+        "drawFromOpponentHandOnDrawPhase",
+      )
+    ) {
+      if (
+        !drawCardsWithOpponentHand(
+          client,
+          room,
+          actor,
+          payload.targetPlayerId,
+        )
+      ) {
+        broadcastRoom(room.id);
+        return;
+      }
+
       clearActiveCharacterAbility(room, actor.playerId);
     } else if (
       hasActiveCharacterAbilityEffect(
@@ -744,6 +773,13 @@ export function startGameServer() {
     ) {
       drawCardsWithSecondCardSuitBonus(room, actor);
       clearActiveCharacterAbility(room, actor.playerId);
+    } else if (
+      hasActiveCharacterAbilityEffect(room, actor.playerId, "chooseDeckTopCards")
+    ) {
+      if (!startDeckTopChoice(room, actor)) {
+        broadcastRoom(room.id);
+        return;
+      }
     } else {
       drawCards(room, client.playerId, 2);
     }
@@ -834,13 +870,19 @@ export function startGameServer() {
 
     if (actor) {
       [...pendingDiscard.cards].reverse().forEach((entry) => {
-        actor.hand.splice(Math.min(entry.index, actor.hand.length), 0, entry.card);
+        actor.hand.splice(
+          Math.min(entry.index, actor.hand.length),
+          0,
+          entry.card,
+        );
       });
       afterPlayerHandChanged(room, actor, {
         allowEmptyHandAbilities: false,
       });
     } else {
-      room.game.discard.push(...pendingDiscard.cards.map((entry) => entry.card));
+      room.game.discard.push(
+        ...pendingDiscard.cards.map((entry) => entry.card),
+      );
     }
 
     room.game.pendingTurnDiscard = null;
@@ -876,6 +918,14 @@ export function startGameServer() {
     );
     const configForCard =
       characterConversion?.targetConfig || baseConfigForCard;
+    const usesCharacterEffectAllowance =
+      configForCard?.effectLimitKey &&
+      hasTurnEffectBeenPlayed(
+        room,
+        client.playerId,
+        configForCard.effectLimitKey,
+      ) &&
+      hasCharacterEffectLimitAllowance(room, actor, configForCard.effectLimitKey);
     const usesEffectAllowance =
       configForCard?.effectLimitKey &&
       hasTurnEffectBeenPlayed(
@@ -887,7 +937,8 @@ export function startGameServer() {
         room,
         client.playerId,
         configForCard.effectLimitKey,
-      );
+      ) &&
+      !usesCharacterEffectAllowance;
 
     if (!configForCard || configForCard.action !== payload.action) {
       sendError(client.socket, "Некорректная карта");
@@ -905,7 +956,8 @@ export function startGameServer() {
         room,
         client.playerId,
         configForCard.effectLimitKey,
-      )
+      ) &&
+      !hasCharacterEffectLimitAllowance(room, actor, configForCard.effectLimitKey)
     ) {
       sendError(client.socket, "Эту карту уже играли в этот ход");
       return;
@@ -921,6 +973,7 @@ export function startGameServer() {
       configForCard,
       characterConversion,
       usesEffectAllowance,
+      usesCharacterEffectAllowance,
     });
 
     if (!actionResult) return;
@@ -929,6 +982,7 @@ export function startGameServer() {
     completePlayedCard(client, room, actor, cardIndex, configForCard, {
       characterConversion,
       usesEffectAllowance,
+      usesCharacterEffectAllowance,
     });
   }
 
@@ -940,15 +994,28 @@ export function startGameServer() {
     configForCard,
     options = {},
   ) {
-    const { characterConversion = null, usesEffectAllowance = false } = options;
+    const {
+      characterConversion = null,
+      usesEffectAllowance = false,
+      usesCharacterEffectAllowance = false,
+    } = options;
+    const isPersistentBangUnlock =
+      configForCard.effectLimitKey === cardConfig.bang.effectLimitKey &&
+      (usesEffectAllowance || usesCharacterEffectAllowance);
 
     if (configForCard.effectLimitKey) {
       if (usesEffectAllowance) {
-        consumeTurnEffectAllowance(
-          room,
-          client.playerId,
-          configForCard.effectLimitKey,
-        );
+        if (!isPersistentBangUnlock) {
+          consumeTurnEffectAllowance(
+            room,
+            client.playerId,
+            configForCard.effectLimitKey,
+          );
+        }
+      } else if (usesCharacterEffectAllowance) {
+        if (!isPersistentBangUnlock) {
+          clearActiveCharacterAbility(room, actor.playerId);
+        }
       } else {
         markTurnEffectPlayed(
           room,
@@ -960,7 +1027,7 @@ export function startGameServer() {
 
     if (configForCard.disposable) {
       const discardedCard = takeCardFromHand(room, actor, cardIndex);
-      room.game.discard.push(discardedCard);
+      discardPlayedCards(room, actor, discardedCard);
     }
 
     if (characterConversion) {
@@ -980,6 +1047,7 @@ export function startGameServer() {
       configForCard,
       characterConversion,
       usesEffectAllowance,
+      usesCharacterEffectAllowance,
     } = context;
     const result = applyBangAction(client, room, payload);
 
@@ -987,6 +1055,12 @@ export function startGameServer() {
 
     if (usesEffectAllowance) {
       addWeaponPropertyUseEvent(room, actor, configForCard.effectLimitKey);
+    }
+
+    if (usesCharacterEffectAllowance) {
+      addCharacterAbilityUseEvent(room, actor, {
+        effect: "unlockBangLimit",
+      });
     }
 
     if (characterConversion) {
@@ -1088,7 +1162,7 @@ export function startGameServer() {
     const playedCard = takeCardFromHand(room, actor, cardIndex);
     const mode = configForCard.targetTableCardMode || "take";
 
-    room.game.discard.push(playedCard);
+    discardPlayedCards(room, actor, playedCard);
 
     if (mode === "take") {
       addCardsToHand(room, actor, result.targetCard);
@@ -1106,6 +1180,7 @@ export function startGameServer() {
       cardColor: configForCard.eventColor,
       targetName: result.targetPlayer.name,
       targetRoleId: result.targetPlayer.roleId,
+      affectedSource: payload.source || "blue",
       affectedCardId: result.targetCard.cardId,
       affectedCardTitle: getCardEventTitle(result.targetCard),
       affectedCardColor: getCardEventColor(result.targetCard),
@@ -1178,7 +1253,7 @@ export function startGameServer() {
     const discardedCard = takeCardFromHand(room, actor, cardIndex);
 
     drawCards(room, actor.playerId, configForCard.drawCount || 1);
-    room.game.discard.push(discardedCard);
+    discardPlayedCards(room, actor, discardedCard);
     markTurnActionTaken(room);
     addCardDrawEvent(room, actor, card, configForCard);
     broadcastRoom(room.id);
@@ -1203,7 +1278,7 @@ export function startGameServer() {
 
     const discardedCard = takeCardFromHand(room, actor, cardIndex);
 
-    room.game.discard.push(discardedCard);
+    discardPlayedCards(room, actor, discardedCard);
     markTurnActionTaken(room);
     addCardOnlyEvent(room, actor, card, configForCard);
     startGeneralStore(room, alivePlayers, storeCards);
@@ -1227,14 +1302,7 @@ export function startGameServer() {
       cardColor: configForCard.eventColor,
     });
     if (replacedWeapon) {
-      addGameEvent(room, {
-        type: "discard",
-        actorName: actor.name,
-        actorRoleId: actor.roleId,
-        cardId: replacedWeapon.cardId,
-        cardTitle: getCardEventTitle(replacedWeapon),
-        cardColor: getCardEventColor(replacedWeapon),
-      });
+      addDiscardEvent(room, actor, replacedWeapon);
     }
     broadcastRoom(room.id);
     return { completed: true };
@@ -1331,18 +1399,45 @@ export function startGameServer() {
     });
   }
 
-  function addDiscardEvent(room, actor, cards) {
+  function addDiscardEvent(room, actor, cards, options = {}) {
     const discardCards = Array.isArray(cards) ? cards : [cards];
-    const eventCards = discardCards.filter(Boolean).map((card) => ({
-      cardId: card.cardId,
-      cardTitle: getCardEventTitle(card),
-      cardColor: getCardEventColor(card),
-    }));
+    const eventCards = (options.eventCards || discardCards)
+      .filter(Boolean)
+      .map((card) => ({
+        cardId: card.cardId,
+        cardTitle: card.cardTitle || getCardEventTitle(card),
+        cardColor: card.cardColor || getCardEventColor(card),
+      }));
 
     if (eventCards.length === 0) return;
 
+    const lastEvent = room.game.events[room.game.events.length - 1] || null;
+
+    if (
+      lastEvent?.type === "discard" &&
+      lastEvent.actorPlayerId === actor.playerId
+    ) {
+      const previousCards = Array.isArray(lastEvent.cards)
+        ? lastEvent.cards
+        : [
+            {
+              cardId: lastEvent.cardId,
+              cardTitle: lastEvent.cardTitle,
+              cardColor: lastEvent.cardColor,
+            },
+          ].filter((card) => card.cardId || card.cardTitle);
+      const mergedCards = [...previousCards, ...eventCards];
+
+      lastEvent.cards = mergedCards;
+      lastEvent.cardId = mergedCards[0].cardId;
+      lastEvent.cardTitle = mergedCards[0].cardTitle;
+      lastEvent.cardColor = mergedCards[0].cardColor;
+      return;
+    }
+
     addGameEvent(room, {
       type: "discard",
+      actorPlayerId: actor.playerId,
       actorName: actor.name,
       actorRoleId: actor.roleId,
       cardId: eventCards[0].cardId,
@@ -1502,6 +1597,10 @@ export function startGameServer() {
       return;
     }
 
+    if (hasActiveCharacterAbilityEffect(room, actor.playerId, "unlockBangLimit")) {
+      clearActiveCharacterAbility(room, actor.playerId);
+    }
+
     addTurnEffectAllowance(
       room,
       actor.playerId,
@@ -1536,11 +1635,23 @@ export function startGameServer() {
         "chooseCheckCard",
         "revealSecondDrawSuitBonus",
         "discardCardsToHeal",
-      ].includes(
-        character.ability.effect,
-      )
+        "characterBarrelCheck",
+        "drawFromOpponentHandOnDrawPhase",
+        "unlockBangLimit",
+        "chooseDeckTopCards",
+      ].includes(character.ability.effect)
     ) {
       sendError(client.socket, "Это свойство пока не поддерживается");
+      return;
+    }
+
+    if (character.ability.effect === "characterBarrelCheck") {
+      if (!canActivateCharacterAbility(room, actor, character.ability.effect)) {
+        sendError(client.socket, "Сейчас нельзя активировать это свойство");
+        return;
+      }
+
+      checkCharacterBarrelReaction(client, room);
       return;
     }
 
@@ -1553,6 +1664,14 @@ export function startGameServer() {
     if (!canActivateCharacterAbility(room, actor, character.ability.effect)) {
       sendError(client.socket, "Сейчас нельзя активировать это свойство");
       return;
+    }
+
+    if (character.ability.effect === "unlockBangLimit") {
+      clearTurnEffectAllowance(
+        room,
+        actor.playerId,
+        cardConfig.bang.effectLimitKey,
+      );
     }
 
     setActiveCharacterAbility(room, actor.playerId, {
@@ -1572,6 +1691,22 @@ export function startGameServer() {
     }
 
     if (effect === "revealSecondDrawSuitBonus") {
+      return canActivateDrawPhaseAbility(room, player);
+    }
+
+    if (effect === "drawFromOpponentHandOnDrawPhase") {
+      return canActivateDrawFromOpponentHand(room, player);
+    }
+
+    if (effect === "characterBarrelCheck") {
+      return canCheckCharacterBarrelForPendingReaction(room, player);
+    }
+
+    if (effect === "unlockBangLimit") {
+      return canActivateBangLimitUnlock(room, player);
+    }
+
+    if (effect === "chooseDeckTopCards") {
       return canActivateDrawPhaseAbility(room, player);
     }
 
@@ -1606,7 +1741,11 @@ export function startGameServer() {
     }
 
     if (card.cardId === "bang" && canUseBangAsMissed(room, player)) {
-      return createCharacterConversion(player, configForCard, cardConfig.missed);
+      return createCharacterConversion(
+        player,
+        configForCard,
+        cardConfig.missed,
+      );
     }
 
     if (
@@ -1650,9 +1789,9 @@ export function startGameServer() {
 
     return Boolean(
       pendingReaction &&
-        player?.isAlive &&
-        isPendingReactionTarget(pendingReaction, player.playerId) &&
-        isReactionAllowed(pendingReaction, player, cardConfig.missed),
+      player?.isAlive &&
+      isPendingReactionTarget(pendingReaction, player.playerId) &&
+      isReactionAllowed(pendingReaction, player, cardConfig.missed),
     );
   }
 
@@ -1661,9 +1800,9 @@ export function startGameServer() {
 
     return Boolean(
       pendingReaction &&
-        player?.isAlive &&
-        isPendingReactionTarget(pendingReaction, player.playerId) &&
-        isReactionAllowed(pendingReaction, player, cardConfig.bang),
+      player?.isAlive &&
+      isPendingReactionTarget(pendingReaction, player.playerId) &&
+      isReactionAllowed(pendingReaction, player, cardConfig.bang),
     );
   }
 
@@ -1672,49 +1811,75 @@ export function startGameServer() {
 
     return Boolean(
       canActivateMissedAsBang(room, player) &&
-        (!hasTurnEffectBeenPlayed(room, player.playerId, bangLimitKey) ||
-          hasTurnEffectAllowance(room, player.playerId, bangLimitKey))
+      (!hasTurnEffectBeenPlayed(room, player.playerId, bangLimitKey) ||
+        hasTurnEffectAllowance(room, player.playerId, bangLimitKey)),
     );
   }
 
   function canActivateMissedAsBang(room, player) {
     return Boolean(
       !room.game.pendingReaction &&
-        !room.game.generalStore &&
-        !room.game.pendingCheckChoice &&
-        player?.isAlive &&
-        room.game.turnPlayerId === player.playerId &&
-        !hasRequiredTurnCheck(room, player.playerId),
+      !room.game.generalStore &&
+      !room.game.pendingCheckChoice &&
+      player?.isAlive &&
+      room.game.turnPlayerId === player.playerId &&
+      !hasRequiredTurnCheck(room, player.playerId),
     );
   }
 
   function canActivateDrawDiscardTop(room, player) {
     return Boolean(
-      canActivateDrawPhaseAbility(room, player) &&
-        getTopDiscardCard(room),
+      canActivateDrawPhaseAbility(room, player) && getTopDiscardCard(room),
     );
+  }
+
+  function canActivateDrawFromOpponentHand(room, player) {
+    return Boolean(
+      canActivateDrawPhaseAbility(room, player) &&
+      getAlivePlayers(room).some(
+        (targetPlayer) => targetPlayer.playerId !== player?.playerId,
+      ),
+    );
+  }
+
+  function canActivateBangLimitUnlock(room, player) {
+    return canActivateMissedAsBang(room, player);
   }
 
   function canActivateDrawPhaseAbility(room, player) {
     return Boolean(
       !room.game.pendingReaction &&
-        !room.game.generalStore &&
-        !room.game.pendingCheckChoice &&
-        player?.isAlive &&
-        room.game.turnPlayerId === player.playerId &&
-        !hasRequiredTurnCheck(room, player.playerId) &&
-        !room.game.turnDrawTaken &&
-        !room.game.turnActionTaken,
+      !room.game.generalStore &&
+      !room.game.pendingCheckChoice &&
+      player?.isAlive &&
+      room.game.turnPlayerId === player.playerId &&
+      !hasRequiredTurnCheck(room, player.playerId) &&
+      !room.game.turnDrawTaken &&
+      !room.game.turnActionTaken,
     );
   }
 
   function canActivateCheckCardChoice(room, player) {
     return Boolean(
       player?.isAlive &&
-        !room.game.generalStore &&
-        !room.game.pendingCheckChoice &&
-        (canCheckTurnBlueCardNow(room, player) ||
-          canCheckBarrelForPendingReaction(room, player)),
+      !room.game.generalStore &&
+      !room.game.pendingCheckChoice &&
+      (canCheckTurnBlueCardNow(room, player) ||
+        canCheckBarrelForPendingReaction(room, player)),
+    );
+  }
+
+  function canCheckCharacterBarrelForPendingReaction(room, player) {
+    const pendingReaction = room.game.pendingReaction;
+    const ability = characterConfig[player?.characterId]?.ability;
+
+    return Boolean(
+      pendingReaction &&
+      player?.isAlive &&
+      ability?.effect === "characterBarrelCheck" &&
+      isPendingReactionTarget(pendingReaction, player.playerId) &&
+      isBarrelAllowedForReaction(pendingReaction) &&
+      !pendingReaction.characterBarrelCheckUsage?.[player.playerId],
     );
   }
 
@@ -1724,11 +1889,11 @@ export function startGameServer() {
 
     return Boolean(
       player?.isAlive &&
-        !room.game.generalStore &&
-        !room.game.pendingCheckChoice &&
-        !room.game.pendingCharacterPayment &&
-        player.health < player.maxHealth &&
-        getPlayerPaymentCardsCount(player) >= requiredCards,
+      !room.game.generalStore &&
+      !room.game.pendingCheckChoice &&
+      !room.game.pendingCharacterPayment &&
+      player.health < player.maxHealth &&
+      getPlayerPaymentCardsCount(player) >= requiredCards,
     );
   }
 
@@ -1809,6 +1974,193 @@ export function startGameServer() {
     });
   }
 
+  function discardPlayedCards(room, actor, cards) {
+    const playedCards = Array.isArray(cards)
+      ? cards.filter(Boolean)
+      : [cards].filter(Boolean);
+
+    playedCards.forEach((card) => {
+      room.game.discard.push(card);
+      tryTriggerPlayedCardReturnCharacterAbility(room, actor, card);
+    });
+  }
+
+  function tryTriggerPlayedCardReturnCharacterAbility(room, player, card) {
+    const ability = characterConfig[player?.characterId]?.ability;
+
+    if (
+      !player?.isAlive ||
+      !card ||
+      ability?.trigger !== "passive" ||
+      ability.effect !== "returnPlayedCardToHand"
+    ) {
+      return false;
+    }
+
+    const chancePercent = Math.max(
+      0,
+      Math.min(100, Number(ability.chancePercent ?? 33) || 0),
+    );
+
+    if (chancePercent <= 0) {
+      return false;
+    }
+
+    if (chancePercent < 100 && randomInt(100) >= chancePercent) {
+      return false;
+    }
+
+    const discardIndex = room.game.discard.lastIndexOf(card);
+
+    if (discardIndex === -1) {
+      return false;
+    }
+
+    room.game.discard.splice(discardIndex, 1);
+    addCardsToHand(room, player, card);
+    addCharacterAbilityUseEvent(room, player, {
+      effect: "returnPlayedCardToHand",
+    });
+    return true;
+  }
+
+  function transferRandomHandCard(room, fromPlayer, toPlayer, options = {}) {
+    if (!fromPlayer || !toPlayer || fromPlayer.playerId === toPlayer.playerId) {
+      return null;
+    }
+
+    if (!fromPlayer.hand?.length) {
+      return null;
+    }
+
+    const cardIndex = randomInt(fromPlayer.hand.length);
+    const card = takeCardFromHand(room, fromPlayer, cardIndex, {
+      allowEmptyHandAbilities: options.allowEmptyHandAbilities !== false,
+    });
+
+    if (!card) {
+      return null;
+    }
+
+    addCardsToHand(room, toPlayer, card, {
+      allowEmptyHandAbilities: options.allowEmptyHandAbilities !== false,
+    });
+
+    return card;
+  }
+
+  function drawCardsWithOpponentHand(client, room, actor, targetPlayerId) {
+    const normalizedTargetPlayerId = normalizePlayerId(targetPlayerId);
+
+    if (!normalizedTargetPlayerId || normalizedTargetPlayerId === actor.playerId) {
+      sendError(client.socket, "Выберите другого игрока");
+      return false;
+    }
+
+    const targetPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === normalizedTargetPlayerId,
+    )?.player;
+
+    if (!targetPlayer?.isAlive) {
+      sendError(client.socket, "Игрок не найден");
+      return false;
+    }
+
+    const stolenCard = transferRandomHandCard(room, targetPlayer, actor);
+
+    if (stolenCard) {
+      addGameEvent(room, {
+        type: "characterAbility",
+        effect: "drawFromOpponentHandOnDrawPhase",
+        actorName: actor.name,
+        actorRoleId: actor.roleId,
+        characterId: actor.characterId,
+        characterTitle: characterConfig[actor.characterId]?.title,
+        targetName: targetPlayer.name,
+        targetRoleId: targetPlayer.roleId,
+      });
+      drawCards(room, actor.playerId, 1);
+      return true;
+    }
+
+    drawCards(room, actor.playerId, 2);
+    return true;
+  }
+
+  function tryTriggerOnHealthLossCharacterAbility(
+    room,
+    player,
+    damageSourcePlayerId = null,
+    options = {},
+  ) {
+    const ability = characterConfig[player?.characterId]?.ability;
+
+    if (
+      !player?.isAlive ||
+      ability?.trigger !== "passive"
+    ) {
+      return false;
+    }
+
+    if (ability.effect === "takeRandomHandCardOnHealthLoss") {
+      if (!damageSourcePlayerId) {
+        return false;
+      }
+
+      const damageSourcePlayer = room.seats.find(
+        (seat) => seat.player?.playerId === damageSourcePlayerId,
+      )?.player;
+
+      if (!damageSourcePlayer?.isAlive || !damageSourcePlayer.hand?.length) {
+        return false;
+      }
+
+      const stolenCard = transferRandomHandCard(
+        room,
+        damageSourcePlayer,
+        player,
+      );
+
+      if (!stolenCard) {
+        return false;
+      }
+
+      addGameEvent(room, {
+        type: "characterAbility",
+        effect: "takeRandomHandCardOnHealthLoss",
+        actorName: player.name,
+        actorRoleId: player.roleId,
+        characterId: player.characterId,
+        characterTitle: characterConfig[player.characterId]?.title,
+        targetName: damageSourcePlayer.name,
+        targetRoleId: damageSourcePlayer.roleId,
+      });
+
+      return true;
+    }
+
+    if (ability.effect === "drawDeckOnHealthLoss") {
+      let activated = false;
+
+      for (let index = 0; index < options.amount; index += 1) {
+        const drawnCards = drawCards(room, player.playerId, 1);
+
+        if (drawnCards.length === 0) {
+          break;
+        }
+
+        addCharacterAbilityUseEvent(room, player, {
+          effect: "drawDeckOnHealthLoss",
+        });
+        activated = true;
+      }
+
+      return activated;
+    }
+
+    return false;
+  }
+
   function takeCardFromHand(room, player, cardIndex, options = {}) {
     if (
       !player ||
@@ -1828,7 +2180,9 @@ export function startGameServer() {
   }
 
   function addCardsToHand(room, player, cards, options = {}) {
-    const nextCards = Array.isArray(cards) ? cards.filter(Boolean) : [cards].filter(Boolean);
+    const nextCards = Array.isArray(cards)
+      ? cards.filter(Boolean)
+      : [cards].filter(Boolean);
 
     if (!player || nextCards.length === 0) return [];
 
@@ -1867,10 +2221,7 @@ export function startGameServer() {
       return;
     }
 
-    if (
-      payment &&
-      payment.playerId !== client.playerId
-    ) {
+    if (payment && payment.playerId !== client.playerId) {
       sendError(client.socket, "Сейчас свойство оплачивает другой игрок");
       return;
     }
@@ -2041,7 +2392,11 @@ export function startGameServer() {
         return;
       }
 
-      player.hand.splice(Math.min(entry.index, player.hand.length), 0, entry.card);
+      player.hand.splice(
+        Math.min(entry.index, player.hand.length),
+        0,
+        entry.card,
+      );
       afterPlayerHandChanged(room, player, {
         allowEmptyHandAbilities: false,
       });
@@ -2050,20 +2405,13 @@ export function startGameServer() {
 
   function resolveCharacterPayment(room, actor, payment) {
     room.game.pendingCharacterPayment = null;
-    room.game.discard.push(...payment.cards.map((entry) => entry.card));
+    const discardedCards = payment.cards.map((entry) => entry.card);
+
+    room.game.discard.push(...discardedCards);
     addCharacterAbilityUseEvent(room, actor, {
       effect: payment.effect,
     });
-    payment.cards.forEach((entry) => {
-      addGameEvent(room, {
-        type: "discard",
-        actorName: actor.name,
-        actorRoleId: actor.roleId,
-        cardId: entry.card.cardId,
-        cardTitle: getCardEventTitle(entry.card),
-        cardColor: getCardEventColor(entry.card),
-      });
-    });
+    addDiscardEvent(room, actor, discardedCards);
     healPlayer(actor, payment.healAmount);
     addCharacterHealEvent(room, actor, payment.healAmount);
   }
@@ -2251,19 +2599,14 @@ export function startGameServer() {
     }
 
     if (payload.source === "hand") {
-      const cardIndex = Number(payload.handIndex);
-
-      if (
-        !Number.isInteger(cardIndex) ||
-        cardIndex < 0 ||
-        cardIndex >= (targetPlayer.hand?.length || 0)
-      ) {
+      if (!targetPlayer.hand?.length) {
         return null;
       }
 
-    const card = takeCardFromHand(room, targetPlayer, cardIndex);
+      const cardIndex = randomInt(targetPlayer.hand.length);
+      const card = takeCardFromHand(room, targetPlayer, cardIndex);
 
-    return card;
+      return card;
     }
 
     return null;
@@ -2295,6 +2638,8 @@ export function startGameServer() {
       targetPlayerId: reaction.targetPlayerId || targetPlayerIds[0] || null,
       healthLoss: reaction.healthLoss || 1,
       barrelChecks: {},
+      barrelCheckUsage: {},
+      characterBarrelCheckUsage: {},
       reactionProgress: {},
       expiresAt: Date.now() + config.reactionWindowMs,
     };
@@ -2329,6 +2674,8 @@ export function startGameServer() {
       .filter((targetPlayer) => targetPlayer.isAlive)
       .forEach((targetPlayer) => {
         applyHealthLoss(room, targetPlayer, pendingReaction.healthLoss, {
+          sourcePlayerId: pendingReaction.actorPlayerId || null,
+          sourceAction: pendingReaction.sourceAction || "",
           silent: pendingReaction.sourceAction === "dynamite",
           reasonText:
             pendingReaction.sourceAction === "duel" ? "проиграл дуэль" : "",
@@ -2358,15 +2705,25 @@ export function startGameServer() {
   function applyHealthLoss(room, player, amount = 1, options = {}) {
     player.health = Math.max(0, player.health - amount);
 
-    if (options.silent) return;
+    if (!options.silent) {
+      addGameEvent(room, {
+        type: "healthLoss",
+        playerName: player.name,
+        playerRoleId: player.roleId,
+        reasonText: options.reasonText || "",
+        amount,
+      });
+    }
 
-    addGameEvent(room, {
-      type: "healthLoss",
-      playerName: player.name,
-      playerRoleId: player.roleId,
-      reasonText: options.reasonText || "",
-      amount,
-    });
+    tryTriggerOnHealthLossCharacterAbility(
+      room,
+      player,
+      options.sourcePlayerId || null,
+      {
+        amount,
+        sourceAction: options.sourceAction || "",
+      },
+    );
   }
 
   function clearPendingReaction(room) {
@@ -2433,7 +2790,8 @@ export function startGameServer() {
   }
 
   function addPartialReactionCard(room, pendingReaction, player, action, card) {
-    const previousProgress = pendingReaction.reactionProgress?.[player.playerId];
+    const previousProgress =
+      pendingReaction.reactionProgress?.[player.playerId];
     const previousCards =
       previousProgress?.action === action ? previousProgress.cards || [] : [];
 
@@ -2454,8 +2812,11 @@ export function startGameServer() {
     const progress = pendingReaction.reactionProgress?.[playerId];
 
     if (!progress?.cards?.length) return;
+    const player = room.seats.find(
+      (seat) => seat.player?.playerId === playerId,
+    )?.player;
 
-    room.game.discard.push(...progress.cards);
+    discardPlayedCards(room, player, progress.cards);
   }
 
   function returnPartialReactionCards(room, pendingReaction) {
@@ -2503,6 +2864,16 @@ export function startGameServer() {
           ([targetPlayerId]) => nextTargetPlayerIds.includes(targetPlayerId),
         ),
       ),
+      barrelCheckUsage: Object.fromEntries(
+        Object.entries(pendingReaction.barrelCheckUsage || {}).filter(
+          ([targetPlayerId]) => nextTargetPlayerIds.includes(targetPlayerId),
+        ),
+      ),
+      characterBarrelCheckUsage: Object.fromEntries(
+        Object.entries(pendingReaction.characterBarrelCheckUsage || {}).filter(
+          ([targetPlayerId]) => nextTargetPlayerIds.includes(targetPlayerId),
+        ),
+      ),
       reactionProgress: Object.fromEntries(
         Object.entries(pendingReaction.reactionProgress || {}).filter(
           ([targetPlayerId]) => nextTargetPlayerIds.includes(targetPlayerId),
@@ -2539,7 +2910,7 @@ export function startGameServer() {
       return;
     }
 
-    if (pendingReaction.barrelChecks?.[client.playerId]) {
+    if (pendingReaction.barrelCheckUsage?.[client.playerId]) {
       sendError(client.socket, "Бочку уже проверяли");
       return;
     }
@@ -2565,28 +2936,89 @@ export function startGameServer() {
     broadcastRoom(room.id);
   }
 
-  function resolveBarrelReactionCheck(room, targetPlayer, drawnCard, options = {}) {
+  function checkCharacterBarrelReaction(client, room) {
     const pendingReaction = room.game.pendingReaction;
-    const { discardDrawn = true } = options;
+
+    if (
+      !pendingReaction ||
+      !isPendingReactionTarget(pendingReaction, client.playerId)
+    ) {
+      sendError(client.socket, "Сейчас нельзя применить это свойство");
+      return;
+    }
+
+    if (!isBarrelAllowedForReaction(pendingReaction)) {
+      sendError(client.socket, "Это свойство не спасает от этой карты");
+      return;
+    }
+
+    const targetPlayer = room.seats.find(
+      (seat) => seat.player?.playerId === client.playerId,
+    )?.player;
+    const character = characterConfig[targetPlayer?.characterId];
+
+    if (!targetPlayer || character?.ability?.effect !== "characterBarrelCheck") {
+      sendError(client.socket, "У персонажа нет такого свойства");
+      return;
+    }
+
+    if (pendingReaction.characterBarrelCheckUsage?.[client.playerId]) {
+      sendError(client.socket, "Свойство уже использовано");
+      return;
+    }
+
+    const drawnCard = drawCheckCard(room);
+
+    if (!drawnCard) {
+      sendError(client.socket, "Колода пуста");
+      return;
+    }
+
+    resolveBarrelReactionCheck(room, targetPlayer, drawnCard, {
+      checkSource: "character",
+      characterTitle: character.title,
+    });
+    broadcastRoom(room.id);
+  }
+
+  function resolveBarrelReactionCheck(
+    room,
+    targetPlayer,
+    drawnCard,
+    options = {},
+  ) {
+    const pendingReaction = room.game.pendingReaction;
+    const {
+      discardDrawn = true,
+      checkSource = "barrel",
+      characterTitle = "",
+    } = options;
 
     if (!pendingReaction || !targetPlayer || !drawnCard) return false;
 
     const isSuccess = drawnCard.suit?.id === "hearts";
+    const nextBarrelChecks = [
+      ...normalizeBarrelCheckResults(
+        pendingReaction.barrelChecks?.[targetPlayer.playerId],
+      ),
+      getBarrelCheckResult(drawnCard, isSuccess, {
+        characterTitle,
+      }),
+    ];
 
     if (discardDrawn) {
       room.game.discard.push(drawnCard);
     }
 
     if (isSuccess) {
-      addBarrelCheckEvent(room, targetPlayer, drawnCard, true);
+      addBarrelCheckEvent(room, targetPlayer, drawnCard, true, {
+        characterTitle,
+      });
       const action = "missed";
       const nextProgress =
         getReactionProgress(pendingReaction, targetPlayer.playerId, action) + 1;
 
-      if (
-        nextProgress >=
-        getRequiredReactionCount(pendingReaction, action)
-      ) {
+      if (nextProgress >= getRequiredReactionCount(pendingReaction, action)) {
         completePendingReactionTarget(room, targetPlayer.playerId);
       } else {
         room.game.pendingReaction = {
@@ -2603,7 +3035,19 @@ export function startGameServer() {
           },
           barrelChecks: {
             ...(pendingReaction.barrelChecks || {}),
-            [targetPlayer.playerId]: getBarrelCheckResult(drawnCard, true),
+            [targetPlayer.playerId]: nextBarrelChecks,
+          },
+          barrelCheckUsage: {
+            ...(pendingReaction.barrelCheckUsage || {}),
+            ...(checkSource === "barrel"
+              ? { [targetPlayer.playerId]: true }
+              : {}),
+          },
+          characterBarrelCheckUsage: {
+            ...(pendingReaction.characterBarrelCheckUsage || {}),
+            ...(checkSource === "character"
+              ? { [targetPlayer.playerId]: true }
+              : {}),
           },
         };
       }
@@ -2614,10 +3058,22 @@ export function startGameServer() {
       ...pendingReaction,
       barrelChecks: {
         ...(pendingReaction.barrelChecks || {}),
-        [targetPlayer.playerId]: getBarrelCheckResult(drawnCard, false),
+        [targetPlayer.playerId]: nextBarrelChecks,
+      },
+      barrelCheckUsage: {
+        ...(pendingReaction.barrelCheckUsage || {}),
+        ...(checkSource === "barrel" ? { [targetPlayer.playerId]: true } : {}),
+      },
+      characterBarrelCheckUsage: {
+        ...(pendingReaction.characterBarrelCheckUsage || {}),
+        ...(checkSource === "character"
+          ? { [targetPlayer.playerId]: true }
+          : {}),
       },
     };
-    addBarrelCheckEvent(room, targetPlayer, drawnCard, false);
+    addBarrelCheckEvent(room, targetPlayer, drawnCard, false, {
+      characterTitle,
+    });
     return true;
   }
 
@@ -2693,10 +3149,10 @@ export function startGameServer() {
 
     return Boolean(
       pendingReaction &&
-        isPendingReactionTarget(pendingReaction, player?.playerId) &&
-        isBarrelAllowedForReaction(pendingReaction) &&
-        hasBlueCardInPlay(player, "barrel") &&
-        !pendingReaction.barrelChecks?.[player.playerId],
+      isPendingReactionTarget(pendingReaction, player?.playerId) &&
+      isBarrelAllowedForReaction(pendingReaction) &&
+      hasBlueCardInPlay(player, "barrel") &&
+      !pendingReaction.barrelCheckUsage?.[player.playerId],
     );
   }
 
@@ -2704,7 +3160,13 @@ export function startGameServer() {
     return getCardCheckConfig(card)?.timing === "turn";
   }
 
-  function resolveTurnBlueCardCheck(room, actor, card, drawnCard = drawCheckCard(room), options = {}) {
+  function resolveTurnBlueCardCheck(
+    room,
+    actor,
+    card,
+    drawnCard = drawCheckCard(room),
+    options = {},
+  ) {
     const checkConfig = getCardCheckConfig(card);
 
     if (checkConfig?.type === "jail") {
@@ -2724,7 +3186,13 @@ export function startGameServer() {
     return cardConfig[card?.cardId]?.check || null;
   }
 
-  function checkJailTurnCard(room, actor, card, drawnCard = drawCheckCard(room), options = {}) {
+  function checkJailTurnCard(
+    room,
+    actor,
+    card,
+    drawnCard = drawCheckCard(room),
+    options = {},
+  ) {
     const { discardDrawn = true } = options;
 
     if (!drawnCard) return;
@@ -2752,7 +3220,13 @@ export function startGameServer() {
     setNextTurnCheck(room, actor);
   }
 
-  function checkDynamiteTurnCard(room, actor, card, drawnCard = drawCheckCard(room), options = {}) {
+  function checkDynamiteTurnCard(
+    room,
+    actor,
+    card,
+    drawnCard = drawCheckCard(room),
+    options = {},
+  ) {
     const { discardDrawn = true } = options;
 
     if (!drawnCard) return;
@@ -2804,7 +3278,11 @@ export function startGameServer() {
       return;
     }
 
-    applyHealthLoss(room, actor, 3, { silent: true });
+    applyHealthLoss(room, actor, 3, {
+      sourcePlayerId: owner?.playerId || actor.playerId,
+      sourceAction: "dynamite",
+      silent: true,
+    });
     const wasRevealed = revealDeadPlayer(room, actor);
 
     if (wasRevealed && !checkVictory(room)) {
@@ -2873,8 +3351,7 @@ export function startGameServer() {
         pendingReaction,
         targetPlayer.playerId,
         reactionAction,
-      ) +
-      1;
+      ) + 1;
     const isPartialReaction = nextReactionProgress < requiredReactionCount;
     const discardedCard = takeCardFromHand(room, targetPlayer, cardIndex, {
       allowEmptyHandAbilities: !isPartialReaction,
@@ -2897,11 +3374,10 @@ export function startGameServer() {
       return;
     }
 
-    room.game.discard.push(discardedCard);
-
     if (payload.action === "beer") {
       healPlayer(targetPlayer, configForCard.healAmount || 1);
       addLifeSavingBeerEvent(room, targetPlayer, card, configForCard);
+      discardPlayedCards(room, targetPlayer, discardedCard);
       targetPlayer.health = Math.max(
         0,
         targetPlayer.health - pendingReaction.healthLoss,
@@ -2914,14 +3390,16 @@ export function startGameServer() {
         addCharacterPropertyUseEvent(room, targetPlayer, characterConversion);
       }
 
-      addGameEvent(room, {
-        type: "discard",
-        actorName: targetPlayer.name,
-        actorRoleId: targetPlayer.roleId,
-        cardId: configForCard.id,
-        cardTitle: getConfigEventTitle(configForCard),
-        cardColor: configForCard.eventColor,
+      addDiscardEvent(room, targetPlayer, null, {
+        eventCards: [
+          {
+            cardId: configForCard.id,
+            cardTitle: getConfigEventTitle(configForCard),
+            cardColor: configForCard.eventColor,
+          },
+        ],
       });
+      discardPlayedCards(room, targetPlayer, discardedCard);
 
       if (characterConversion) {
         clearActiveCharacterAbility(room, targetPlayer.playerId);
@@ -2945,6 +3423,7 @@ export function startGameServer() {
         cardTitle: getConfigEventTitle(configForCard),
         cardColor: configForCard.eventColor,
       });
+      discardPlayedCards(room, targetPlayer, discardedCard);
     }
 
     if (characterConversion) {
@@ -3155,6 +3634,10 @@ export function startGameServer() {
     return publicState.getPublicRoom(room, viewerPlayerId);
   }
 
+  function getPublicRoomSummary(room) {
+    return publicState.getPublicRoomSummary(room);
+  }
+
   function getPublicCard(room, player, card, options = {}) {
     return publicState.getPublicCard(room, player, card, options);
   }
@@ -3204,7 +3687,8 @@ export function startGameServer() {
         room,
         player.playerId,
         configForCard.effectLimitKey,
-      )
+      ) ||
+      hasCharacterEffectLimitAllowance(room, player, configForCard.effectLimitKey)
     );
   }
 
@@ -3224,7 +3708,20 @@ export function startGameServer() {
         room,
         player.playerId,
         configForCard.effectLimitKey,
-      )
+      ) &&
+      !hasCharacterEffectLimitAllowance(room, player, configForCard.effectLimitKey)
+    );
+  }
+
+  function hasCharacterEffectLimitAllowance(room, player, effectLimitKey) {
+    if (effectLimitKey !== cardConfig.bang.effectLimitKey) {
+      return false;
+    }
+
+    return hasActiveCharacterAbilityEffect(
+      room,
+      player?.playerId,
+      "unlockBangLimit",
     );
   }
 
@@ -3314,15 +3811,7 @@ export function startGameServer() {
         return [];
       }
 
-      return [
-        {
-          id: room.id,
-          name: room.name,
-          status: room.status,
-          playersCount,
-          maxPlayers: room.seats.length,
-        },
-      ];
+      return [getPublicRoomSummary(room)];
     });
   }
 
@@ -3396,6 +3885,9 @@ export function startGameServer() {
     players.forEach((player, index) => {
       player.roleId = roles[index];
       player.characterId = characters[index] || null;
+      if (player.characterId && isAutoSeatPlayerName(player.name)) {
+        player.name = characterConfig[player.characterId]?.title || player.name;
+      }
       player.isRoleRevealed = player.roleId === "sheriff";
       player.isAlive = true;
       player.leftGame = false;
@@ -3711,7 +4203,7 @@ export function startGameServer() {
       checkCardTitle: "ЧервыБуби",
       checkCardColor: "#c94a35",
       isSuccess,
-      consequenceText: isSuccess ? "взял доп. карту" : "ничего",
+      consequenceText: isSuccess ? "взял доп. карту" : "",
       drawnCard: revealedCard,
     });
   }
@@ -3917,6 +4409,52 @@ export function startGameServer() {
     return true;
   }
 
+  function startDeckTopChoice(room, player) {
+    const activeAbility = room.game.activeCharacterAbilities?.[player.playerId];
+    const character = characterConfig[player.characterId];
+
+    if (
+      !activeAbility ||
+      activeAbility.characterId !== player.characterId ||
+      activeAbility.effect !== "chooseDeckTopCards" ||
+      character?.ability?.effect !== "chooseDeckTopCards"
+    ) {
+      return false;
+    }
+
+    const cardsCount = Math.max(3, character.ability.cardsCount || 3);
+    const cards = drawCardsFromDeck(room, cardsCount);
+
+    if (cards.length === 0) {
+      return false;
+    }
+
+    clearActiveCharacterAbility(room, player.playerId);
+
+    room.game.pendingCheckChoice = {
+      id: randomUUID(),
+      playerId: player.playerId,
+      playerName: player.name,
+      playerRoleId: player.roleId,
+      characterId: player.characterId,
+      characterTitle: character.title,
+      effect: "chooseDeckTopCards",
+      cards,
+      chooseCount: Math.min(
+        Math.max(1, character.ability.chooseCount || 2),
+        Math.max(1, cards.length - 1),
+      ),
+      selectedCardInstanceIds: [],
+      context: {
+        type: "drawPhaseChoice",
+      },
+      expiresAt: Date.now() + config.checkChoiceWindowMs,
+    };
+    scheduleCheckChoice(room);
+
+    return true;
+  }
+
   function chooseCheckCard(client, room, payload = {}) {
     const pendingCheckChoice = room.game.pendingCheckChoice;
 
@@ -3939,8 +4477,45 @@ export function startGameServer() {
       return;
     }
 
+    if (pendingCheckChoice.effect === "chooseDeckTopCards") {
+      togglePendingDeckTopChoice(room, pendingCheckChoice.cards[cardIndex]);
+      broadcastRoom(room.id);
+      return;
+    }
+
     resolvePendingCheckChoice(room, cardIndex);
     broadcastRoom(room.id);
+  }
+
+  function togglePendingDeckTopChoice(room, card) {
+    const pendingCheckChoice = room.game.pendingCheckChoice;
+
+    if (!pendingCheckChoice || pendingCheckChoice.effect !== "chooseDeckTopCards") {
+      return false;
+    }
+
+    const selectedCardInstanceIds = new Set(
+      pendingCheckChoice.selectedCardInstanceIds || [],
+    );
+
+    if (selectedCardInstanceIds.has(card.instanceId)) {
+      selectedCardInstanceIds.delete(card.instanceId);
+    } else {
+      selectedCardInstanceIds.add(card.instanceId);
+    }
+
+    const selectedIds = [...selectedCardInstanceIds];
+
+    room.game.pendingCheckChoice = {
+      ...pendingCheckChoice,
+      selectedCardInstanceIds: selectedIds,
+    };
+
+    if (selectedIds.length >= (pendingCheckChoice.chooseCount || 2)) {
+      resolvePendingDeckTopChoice(room, selectedIds);
+    }
+
+    return true;
   }
 
   function scheduleCheckChoice(room) {
@@ -3962,8 +4537,62 @@ export function startGameServer() {
       return;
     }
 
+    if (pendingCheckChoice.effect === "chooseDeckTopCards") {
+      const chooseCount = Math.min(
+        pendingCheckChoice.chooseCount || 2,
+        pendingCheckChoice.cards.length,
+      );
+      const selectedIds = shuffle([...pendingCheckChoice.cards])
+        .slice(0, chooseCount)
+        .map((card) => card.instanceId);
+
+      resolvePendingDeckTopChoice(room, selectedIds);
+      broadcastRoom(room.id);
+      return;
+    }
+
     resolvePendingCheckChoice(room, randomInt(pendingCheckChoice.cards.length));
     broadcastRoom(room.id);
+  }
+
+  function resolvePendingDeckTopChoice(room, selectedCardInstanceIds) {
+    const pendingCheckChoice = room.game.pendingCheckChoice;
+
+    if (!pendingCheckChoice || pendingCheckChoice.effect !== "chooseDeckTopCards") {
+      return false;
+    }
+
+    const actor = room.seats.find(
+      (seat) => seat.player?.playerId === pendingCheckChoice.playerId,
+    )?.player;
+    const selectedIds = new Set(selectedCardInstanceIds || []);
+    const chooseCount = Math.min(
+      pendingCheckChoice.chooseCount || 2,
+      pendingCheckChoice.cards.length,
+    );
+    const chosenCards = pendingCheckChoice.cards.filter((card) =>
+      selectedIds.has(card.instanceId),
+    );
+    const normalizedChosenCards = chosenCards.slice(0, chooseCount);
+    const remainingCards = pendingCheckChoice.cards.filter(
+      (card) => !selectedIds.has(card.instanceId),
+    );
+
+    clearPendingCheckChoice(room);
+
+    room.game.deck.unshift(...[...remainingCards].reverse());
+
+    if (!actor?.isAlive || normalizedChosenCards.length === 0) {
+      return false;
+    }
+
+    addCardsToHand(room, actor, normalizedChosenCards, {
+      allowEmptyHandAbilities: false,
+    });
+    addCharacterAbilityUseEvent(room, actor, {
+      effect: "chooseDeckTopCards",
+    });
+    return true;
   }
 
   function resolvePendingCheckChoice(room, cardIndex) {
@@ -4095,8 +4724,8 @@ export function startGameServer() {
     };
   }
 
-  function addBarrelCheckEvent(room, actor, drawnCard, isSuccess) {
-    const checkResult = getBarrelCheckResult(drawnCard, isSuccess);
+  function addBarrelCheckEvent(room, actor, drawnCard, isSuccess, options = {}) {
+    const checkResult = getBarrelCheckResult(drawnCard, isSuccess, options);
 
     addGameEvent(room, {
       type: "barrelCheck",
@@ -4107,16 +4736,27 @@ export function startGameServer() {
     });
   }
 
-  function getBarrelCheckResult(drawnCard, isSuccess) {
+  function getBarrelCheckResult(drawnCard, isSuccess, options = {}) {
     return {
       checkCardId: "barrel",
       checkCardTitle: cardConfig.barrel.eventTitle,
       checkCardColor: cardConfig.barrel.eventColor,
+      characterTitle: options.characterTitle || "",
       resultTitle: isSuccess ? "УСПЕХ" : "ПРОВАЛ",
-      consequenceText: isSuccess ? "бочка спасла" : "есть пробитие",
+      consequenceText: isSuccess
+        ? options.characterTitle
+          ? "свойство спасло"
+          : "бочка спасла"
+        : "есть пробитие",
       drawnCard: getPublicCheckCard(drawnCard),
       isSuccess,
     };
+  }
+
+  function normalizeBarrelCheckResults(results) {
+    if (!results) return [];
+
+    return Array.isArray(results) ? results.filter(Boolean) : [results];
   }
 
   function addTurnCheckEvent(room, actor, options) {
@@ -4429,7 +5069,7 @@ export function startGameServer() {
         createdAt: Date.now(),
         ...normalizedEvent,
       },
-    ].slice(-10);
+    ].slice(-MAX_GAME_EVENTS);
   }
 
   function scheduleGameExpiration(room) {
@@ -4530,27 +5170,58 @@ export function startGameServer() {
   }
 
   function broadcastRoom(roomId) {
-    const room = roomId ? rooms.get(roomId) : null;
+    if (!roomId) return;
 
-    if (!room) return;
-
-    if (room.status === "game" || room.status === "finished") {
-      flushHandChangedPlayers(room);
-    }
-
-    clients.forEach((client) => {
-      if (client.roomId === roomId) {
-        send(client.socket, "room:update", {
-          room: getPublicRoom(room, client.playerId),
-        });
-      }
-    });
+    pendingRoomBroadcasts.add(roomId);
+    scheduleBroadcastFlush();
   }
 
   function broadcastRoomList() {
+    shouldBroadcastRoomList = true;
+    scheduleBroadcastFlush();
+  }
+
+  function scheduleBroadcastFlush() {
+    if (isBroadcastFlushScheduled) return;
+
+    isBroadcastFlushScheduled = true;
+    queueMicrotask(flushBroadcasts);
+  }
+
+  function flushBroadcasts() {
+    isBroadcastFlushScheduled = false;
+    const roomIds = [...pendingRoomBroadcasts];
+
+    pendingRoomBroadcasts.clear();
+
+    roomIds.forEach((roomId) => {
+      const room = roomId ? rooms.get(roomId) : null;
+
+      if (!room) return;
+
+      if (room.status === "game" || room.status === "finished") {
+        flushHandChangedPlayers(room);
+      }
+
+      clients.forEach((client) => {
+        if (client.roomId === roomId) {
+          send(client.socket, "room:update", {
+            room: getPublicRoom(room, client.playerId),
+          });
+        }
+      });
+    });
+
+    if (!shouldBroadcastRoomList) {
+      return;
+    }
+
+    shouldBroadcastRoomList = false;
     const payload = { rooms: getPublicRooms() };
 
     clients.forEach((client) => {
+      if (client.roomId) return;
+
       send(client.socket, "rooms:update", payload);
     });
   }

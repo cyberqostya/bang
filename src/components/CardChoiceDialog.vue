@@ -12,6 +12,10 @@ defineProps({
     type: Array,
     default: () => [],
   },
+  selectedCardInstanceIds: {
+    type: Array,
+    default: () => [],
+  },
   isCurrentPicker: {
     type: Boolean,
     default: false,
@@ -44,6 +48,7 @@ function closePreview() {
         :key="card.instanceId"
         :card="card"
         :is-aria-disabled="!isCurrentPicker"
+        :is-attention="selectedCardInstanceIds.includes(card.instanceId)"
         @activate="isCurrentPicker && emit('choose', card.instanceId)"
         @preview="openPreview"
       />

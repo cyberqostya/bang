@@ -28,6 +28,7 @@ export const useRoomStore = defineStore("room", () => {
   const rooms = ref([]);
   const isDiscardingCards = ref(false);
   const selectedCardId = ref("");
+  const isSelectingDrawTarget = ref(false);
   const socket = ref(null);
   let connectCountdownTimer = null;
   let connectTimeoutTimer = null;
@@ -51,8 +52,16 @@ export const useRoomStore = defineStore("room", () => {
     () => Boolean(playerId.value) && room.value.hostPlayerId === playerId.value,
   );
   const isSeated = computed(() => Boolean(ownPlayer.value));
+  const currentRoomSummary = computed(
+    () => rooms.value.find((entry) => entry.id === room.value.id) || null,
+  );
   const canStartGame = computed(
-    () => isHost.value && room.value.playersCount > 1,
+    () =>
+      isHost.value &&
+      Math.max(
+        room.value.playersCount || 0,
+        currentRoomSummary.value?.playersCount || 0,
+      ) > 1,
   );
   const isMyTurn = computed(
     () => room.value.game?.turnPlayerId === playerId.value,
@@ -82,6 +91,9 @@ export const useRoomStore = defineStore("room", () => {
     () =>
       ownHand.value.find((card) => card.instanceId === selectedCardId.value) ||
       null,
+  );
+  const ownActiveCharacterAbility = computed(
+    () => ownPlayer.value?.activeCharacterAbility || null,
   );
   const wsUrl = computed(() => getWebSocketUrl());
   const connectionActionLabel = computed(() => {
@@ -264,6 +276,21 @@ export const useRoomStore = defineStore("room", () => {
     selectedCardId.value = "";
   }
 
+  function beginDrawTargetSelection() {
+    if (
+      ownActiveCharacterAbility.value?.effect !== "drawFromOpponentHandOnDrawPhase"
+    ) {
+      return;
+    }
+
+    cancelSelectedCard();
+    isSelectingDrawTarget.value = true;
+  }
+
+  function cancelDrawTargetSelection() {
+    isSelectingDrawTarget.value = false;
+  }
+
   function useSelectedCard(targetPlayerId) {
     if (!selectedCard.value) return;
 
@@ -294,10 +321,18 @@ export const useRoomStore = defineStore("room", () => {
     cancelSelectedCard();
   }
 
-  function drawPhase() {
+  function drawPhase(targetPlayerId = "") {
     send("game:action", {
       action: "drawPhase",
+      ...(targetPlayerId ? { targetPlayerId } : {}),
     });
+    isSelectingDrawTarget.value = false;
+  }
+
+  function useDrawPhaseTarget(targetPlayerId) {
+    if (!isSelectingDrawTarget.value) return;
+
+    drawPhase(targetPlayerId);
   }
 
   function activateWeaponProperty() {
@@ -399,6 +434,19 @@ export const useRoomStore = defineStore("room", () => {
 
     if (message.type === "rooms:update") {
       rooms.value = message.payload.rooms || [];
+
+      if (room.value.id) {
+        const roomSummary =
+          rooms.value.find((entry) => entry.id === room.value.id) || null;
+
+        if (roomSummary) {
+          room.value = {
+            ...room.value,
+            playersCount: roomSummary.playersCount,
+          };
+        }
+      }
+
       return;
     }
 
@@ -406,6 +454,7 @@ export const useRoomStore = defineStore("room", () => {
       room.value = message.payload.room || fallbackRoom;
       error.value = "";
       syncDiscardMode();
+      syncDrawTargetSelection();
       syncScreenWithRoom();
 
       return;
@@ -417,6 +466,7 @@ export const useRoomStore = defineStore("room", () => {
       error.value = "Комната закрыта";
       cancelSelectedCard();
       isDiscardingCards.value = false;
+      isSelectingDrawTarget.value = false;
       return;
     }
 
@@ -427,6 +477,7 @@ export const useRoomStore = defineStore("room", () => {
       error.value = "";
       cancelSelectedCard();
       isDiscardingCards.value = false;
+      isSelectingDrawTarget.value = false;
       return;
     }
 
@@ -473,6 +524,17 @@ export const useRoomStore = defineStore("room", () => {
 
     if (!mustDiscardCards.value) {
       isDiscardingCards.value = false;
+    }
+  }
+
+  function syncDrawTargetSelection() {
+    if (
+      room.value.status !== "game" ||
+      room.value.game?.turnPlayerId !== playerId.value ||
+      room.value.game?.turnDrawTaken ||
+      ownActiveCharacterAbility.value?.effect !== "drawFromOpponentHandOnDrawPhase"
+    ) {
+      isSelectingDrawTarget.value = false;
     }
   }
 
@@ -531,6 +593,7 @@ export const useRoomStore = defineStore("room", () => {
     ownHand,
     ownCharacterPayment,
     mustDiscardCards,
+    isSelectingDrawTarget,
     playerId,
     players,
     room,
@@ -541,9 +604,11 @@ export const useRoomStore = defineStore("room", () => {
     wsUrl,
     cancelSelectedCard,
     cancelCharacterPayment,
+    cancelDrawTargetSelection,
     cancelTurnDiscard,
     activateCharacterAbility,
     activateWeaponProperty,
+    beginDrawTargetSelection,
     checkBarrel,
     checkTurnBlueCard,
     chooseCheckCard,
@@ -566,6 +631,7 @@ export const useRoomStore = defineStore("room", () => {
     startDiscardingCards,
     takeSeat,
     useTargetTableCard,
+    useDrawPhaseTarget,
     useSelectedCard,
   };
 });

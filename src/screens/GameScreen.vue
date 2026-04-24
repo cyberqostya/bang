@@ -47,7 +47,8 @@ let turnCheckProgressTimer = null;
 const gameEvents = computed(() => roomStore.room.game?.events || []);
 const { resultDialogSegments } = useGameResult(roomStore);
 const {
-  barrelCheckFailure,
+  barrelCheckFailures,
+  barrelCheckFailureEvents,
   isReactionActor,
   isReactionTarget,
   pendingReaction,
@@ -192,7 +193,13 @@ const checkChoiceProgressStyle = computed(() => {
   return { transform: `scaleX(${ratio})` };
 });
 const checkChoiceNoticeText = computed(() =>
-  isCheckChoiceCurrentPicker.value ? "Выбери карту проверки" : "Выбирает карту проверки",
+  pendingCheckChoice.value?.effect === "chooseDeckTopCards"
+    ? isCheckChoiceCurrentPicker.value
+      ? "Выбери 2 карты себе"
+      : "Выбирает 2 карты себе"
+    : isCheckChoiceCurrentPicker.value
+      ? "Выбери карту проверки"
+      : "Выбирает карту проверки",
 );
 const canFinishGameRoom = computed(
   () => Boolean(roomStore.room.game?.winnerText) && finishDelayLeft.value === 0,
@@ -449,6 +456,10 @@ function toggleViewMode() {
     roomStore.cancelSelectedCard();
   }
 
+   if (viewMode.value === "players" && roomStore.isSelectingDrawTarget) {
+    roomStore.cancelDrawTargetSelection();
+  }
+
   if (viewMode.value === "cards") {
     viewMode.value = "players";
     return;
@@ -463,6 +474,10 @@ function showCardsView() {
 
   if (viewMode.value === "players" && roomStore.selectedCard) {
     roomStore.cancelSelectedCard();
+  }
+
+  if (viewMode.value === "players" && roomStore.isSelectingDrawTarget) {
+    roomStore.cancelDrawTargetSelection();
   }
 
   inspectedPlayerId.value = "";
@@ -605,6 +620,16 @@ function handleDrawPhase() {
   if (!canUseDrawPhase.value) return;
 
   activePhaseIndex.value = Math.max(activePhaseIndex.value, 0);
+  if (
+    roomStore.ownPlayer?.activeCharacterAbility?.effect ===
+    "drawFromOpponentHandOnDrawPhase"
+  ) {
+    roomStore.beginDrawTargetSelection();
+    inspectedPlayerId.value = "";
+    viewMode.value = "players";
+    return;
+  }
+
   roomStore.drawPhase();
 }
 
@@ -867,8 +892,15 @@ function chooseCheckCard(cardInstanceId) {
 
     <CardChoiceDialog
       v-if="pendingCheckChoice"
-      aria-label="Выбор карты проверки"
+      :aria-label="
+        pendingCheckChoice.effect === 'chooseDeckTopCards'
+          ? 'Выбор двух карт'
+          : 'Выбор карты проверки'
+      "
       :cards="pendingCheckChoice.cards"
+      :selected-card-instance-ids="
+        pendingCheckChoice.selectedCardInstanceIds || []
+      "
       :is-current-picker="isCheckChoiceCurrentPicker"
       @choose="chooseCheckCard"
     />
@@ -897,7 +929,8 @@ function chooseCheckCard(cardInstanceId) {
       <ReactionNotice
         v-if="shouldShowReactionOverlay && !pendingCheckChoice"
         :key="pendingReaction?.id"
-        :barrel-check-failure="barrelCheckFailure"
+        :barrel-check-failures="barrelCheckFailures"
+        :barrel-check-failure-events="barrelCheckFailureEvents"
         :is-reaction-target="isReactionTarget"
         :pending-reaction="pendingReaction"
         :reaction-actor-prompt="reactionActorPrompt"

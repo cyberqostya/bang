@@ -87,12 +87,15 @@ function openCard(cardId) {
       </span>
       <span class="game-event-message__separator"> -- </span>
       <template v-if="event.cardId === 'panic'">
-        <span>взял</span>
-        <span class="game-event-message__separator"> -- </span>
-        <span>{{ event.affectedCardTitle }}</span>
+        <template v-if="event.affectedSource === 'hand'">
+          <span>взял карту с руки</span>
+        </template>
+        <template v-else>
+          <span>взял {{ event.affectedCardTitle }}</span>
+        </template>
       </template>
       <template v-else>
-        <span>сброс</span>
+        <span>сброс </span>
         <span> {{ event.affectedCardTitle }}</span>
       </template>
     </template>
@@ -106,9 +109,8 @@ function openCard(cardId) {
       <span class="game-event-message__separator"> -- </span>
       <span>
         {{
-          (event.cards || [])
-            .map((card) => card.cardTitle)
-            .join(", ") || event.cardTitle
+          (event.cards || []).map((card) => card.cardTitle).join(", ") ||
+          event.cardTitle
         }}
       </span>
     </template>
@@ -195,16 +197,24 @@ function openCard(cardId) {
       <span class="game-event-message__player">
         {{ getPlayerLabel(event.actorRoleId, event.actorName) }}
       </span>
-      <span class="game-event-message__separator"> -- </span>
-      <span>проверка </span>
-      <GameEventCardTitle
-        :card-id="event.checkCardId"
-        :title="getCheckCardTitle(event)"
-        :color="getCheckCardColor(event)"
-        :interactive="props.tone !== 'light'"
-        :tone="props.tone"
-        @open-card="openCard"
-      />
+      <template v-if="event.characterTitle">
+        <span> активировал свойство </span>
+        <span class="game-event-message__character">
+          {{ event.characterTitle }}
+        </span>
+      </template>
+      <template v-else>
+        <span class="game-event-message__separator"> -- </span>
+        <span>проверка </span>
+        <GameEventCardTitle
+          :card-id="event.checkCardId"
+          :title="getCheckCardTitle(event)"
+          :color="getCheckCardColor(event)"
+          :interactive="props.tone !== 'light'"
+          :tone="props.tone"
+          @open-card="openCard"
+        />
+      </template>
       <span class="game-event-message__separator"> -- </span>
       <span>{{ getCheckResultTitle(event) }}</span>
       <span class="game-event-message__separator"> -- </span>
@@ -356,12 +366,28 @@ function openCard(cardId) {
       <span class="game-event-message__character">
         {{ event.characterTitle }}
       </span>
-      <span class="game-event-message__separator"> -- </span>
-      <span>забрал карты</span>
-      <span class="game-event-message__separator"> -- </span>
-      <span class="game-event-message__player">
-        {{ getPlayerLabel(event.targetRoleId, event.targetName) }}
-      </span>
+      <template v-if="event.effect === 'takeRandomHandCardOnHealthLoss'">
+        <span class="game-event-message__separator"> -- </span>
+        <span>взял карту с руки </span>
+        <span class="game-event-message__player">
+          {{ getPlayerLabel(event.targetRoleId, event.targetName) }}
+        </span>
+      </template>
+      <template v-else-if="event.effect === 'drawFromOpponentHandOnDrawPhase'">
+        <span class="game-event-message__separator"> -- </span>
+        <span>взял карту с руки </span>
+        <span class="game-event-message__player">
+          {{ getPlayerLabel(event.targetRoleId, event.targetName) }}
+        </span>
+      </template>
+      <template v-else>
+        <span class="game-event-message__separator"> -- </span>
+        <span>забрал карты</span>
+        <span class="game-event-message__separator"> -- </span>
+        <span class="game-event-message__player">
+          {{ getPlayerLabel(event.targetRoleId, event.targetName) }}
+        </span>
+      </template>
     </template>
 
     <template v-else-if="event.type === 'characterAbilityUse'">
@@ -382,6 +408,19 @@ function openCard(cardId) {
         <span class="game-event-message__separator"> -- </span>
         <span>взял карту из колоды</span>
       </template>
+      <template v-else-if="event.effect === 'drawDeckOnHealthLoss'">
+        <span class="game-event-message__separator"> -- </span>
+        <span>взял карту из колоды</span>
+      </template>
+      <template v-else-if="event.effect === 'chooseDeckTopCards'">
+        <span class="game-event-message__separator"> -- </span>
+        <span>взял 2 карты себе, 1 вернул на верх колоды</span>
+      </template>
+      <template v-else-if="event.effect === 'returnPlayedCardToHand'">
+        <span class="game-event-message__separator"> -- </span>
+        <span>вернул карту в руку</span>
+      </template>
+      <template v-else-if="event.effect === 'unlockBangLimit'"></template>
     </template>
 
     <template v-else-if="event.type === 'outlawBounty'">

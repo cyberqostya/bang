@@ -58,12 +58,30 @@ export function useReactionNotice(roomStore, reactionNow, reactionDeadlineAt) {
     backgroundColor: reactionNoticeColor.value,
     transform: `scaleX(${reactionTimeLeftRatio.value})`,
   }));
-  const barrelCheckFailure = computed(
-    () => pendingReaction.value?.barrelChecks?.[roomStore.playerId] || null,
-  );
+  const barrelCheckFailures = computed(() => {
+    const currentChecks = pendingReaction.value?.barrelChecks?.[roomStore.playerId];
+
+    if (!currentChecks) return [];
+
+    return Array.isArray(currentChecks)
+      ? currentChecks.filter(Boolean)
+      : [currentChecks];
+  });
+  const barrelCheckFailureEvents = computed(() => {
+    if (!barrelCheckFailures.value.length || !roomStore.ownPlayer) return [];
+
+    return barrelCheckFailures.value.map((barrelCheckFailure) => ({
+      type: "barrelCheck",
+      actorPlayerId: roomStore.ownPlayer.playerId,
+      actorName: roomStore.ownPlayer.name,
+      actorRoleId: roomStore.ownPlayer.role?.id || "",
+      ...barrelCheckFailure,
+    }));
+  });
 
   return {
-    barrelCheckFailure,
+    barrelCheckFailures,
+    barrelCheckFailureEvents,
     isReactionActor,
     isReactionTarget,
     pendingReaction,

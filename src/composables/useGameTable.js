@@ -19,11 +19,12 @@ export function useGameTable(roomStore, emit) {
         isOwn: seat.player?.playerId === roomStore.playerId,
         isTurn: seat.player?.playerId === roomStore.room.game?.turnPlayerId,
         isTargetable: Boolean(
-          roomStore.selectedCard?.needsTarget &&
+          ((roomStore.selectedCard?.needsTarget &&
             roomStore.selectedCard?.isPlayable &&
+            isTargetAllowedForSelectedCard(seat)) ||
+            isTargetAllowedForDrawPhaseAbility(seat)) &&
             seat.player.playerId !== roomStore.playerId &&
-            seat.player.isAlive &&
-            isTargetAllowedForSelectedCard(seat),
+            seat.player.isAlive,
         ),
         rangeStatusStyle: getRangeStatusStyle(seat.index),
         cardStatuses: getCardStatusesForSeat(seat),
@@ -72,6 +73,12 @@ export function useGameTable(roomStore, emit) {
     }
 
     if (seat.isTargetable) {
+      if (roomStore.isSelectingDrawTarget) {
+        roomStore.useDrawPhaseTarget(seat.player.playerId);
+        emit("showCards");
+        return;
+      }
+
       if (roomStore.selectedCard?.targetTableCardMode) {
         emit("inspectPlayer", seat.player.playerId);
         return;
@@ -131,6 +138,10 @@ export function useGameTable(roomStore, emit) {
     }
 
     return true;
+  }
+
+  function isTargetAllowedForDrawPhaseAbility(seat) {
+    return roomStore.isSelectingDrawTarget && seat.player.isAlive;
   }
 
   function getCardStatusesForSeat(seat) {

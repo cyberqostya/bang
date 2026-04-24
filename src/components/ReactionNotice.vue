@@ -39,9 +39,13 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
-  barrelCheckFailure: {
-    type: Object,
-    default: null,
+  barrelCheckFailures: {
+    type: Array,
+    default: () => [],
+  },
+  barrelCheckFailureEvents: {
+    type: Array,
+    default: () => [],
   },
   turnCheckNotice: {
     type: Object,
@@ -67,7 +71,7 @@ const reactionModifierTitle = computed(
   () => props.pendingReaction?.reactionModifier?.characterTitle || "",
 );
 const shouldShowBarrelCheckFailure = computed(
-  () => shouldShowReactionHint.value && props.barrelCheckFailure,
+  () => shouldShowReactionHint.value && props.barrelCheckFailureEvents.length > 0,
 );
 </script>
 
@@ -118,36 +122,15 @@ const shouldShowBarrelCheckFailure = computed(
         </span>
       </p>
 
-      <p
-        v-if="shouldShowBarrelCheckFailure"
-        class="reaction-notice__subtext reaction-notice__check-text"
-      >
-        <span>проверка {{ barrelCheckFailure.checkCardTitle }}</span>
-        <span> -- {{ barrelCheckFailure.resultTitle }}</span>
-        <span> -- вытянул карту </span>
-        <span class="reaction-notice__check-card">
-          <span>"</span>
-          <span :style="{ color: barrelCheckFailure.drawnCard?.suit?.color }">
-            {{ barrelCheckFailure.drawnCard?.title }}
-          </span>
-          <span>-</span>
-          <span
-            class="reaction-notice__check-rank"
-            :style="{ color: barrelCheckFailure.drawnCard?.suit?.color }"
-          >
-            {{ barrelCheckFailure.drawnCard?.rank?.label }}
-          </span>
-          <img
-            class="reaction-notice__check-suit"
-            :src="barrelCheckFailure.drawnCard?.suit?.image"
-            :alt="barrelCheckFailure.drawnCard?.suit?.label"
-          />
-          <span>"</span>
-        </span>
-        <span v-if="barrelCheckFailure.consequenceText">
-          -- {{ barrelCheckFailure.consequenceText }}
-        </span>
-      </p>
+      <div v-if="shouldShowBarrelCheckFailure" class="reaction-notice__checks">
+        <p
+          v-for="(barrelCheckFailureEvent, index) in barrelCheckFailureEvents"
+          :key="`${barrelCheckFailureEvent.characterTitle || 'barrel'}-${index}`"
+          class="reaction-notice__subtext reaction-notice__check-text"
+        >
+          <GameEventMessage :event="barrelCheckFailureEvent" />
+        </p>
+      </div>
     </div>
     <span v-if="shouldShowCount" class="reaction-notice__count">
       {{ reactionCountdown }}
@@ -227,6 +210,11 @@ const shouldShowBarrelCheckFailure = computed(
   font-weight: 500;
   line-height: 1;
   text-wrap: balance;
+}
+
+.reaction-notice__checks {
+  display: grid;
+  gap: 2px;
 }
 
 .reaction-notice__check-text {
