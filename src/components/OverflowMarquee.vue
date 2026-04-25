@@ -1,5 +1,12 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 
 const props = defineProps({
   text: {
@@ -85,8 +92,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .overflow-marquee {
   display: block;
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  padding: 0.08em 0 0.18em;
   overflow: hidden;
 }
 
