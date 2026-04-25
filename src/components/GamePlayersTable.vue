@@ -10,6 +10,7 @@ import {
 import { useGameTable } from "../composables/useGameTable.js";
 import { useRoomStore } from "../stores/roomStore.js";
 import { resolveAssetUrl } from "../utils/assets.js";
+import OverflowMarquee from "./OverflowMarquee.vue";
 
 const roomStore = useRoomStore();
 const emit = defineEmits(["showCards", "inspectPlayer"]);
@@ -152,7 +153,7 @@ onBeforeUnmount(() => {
           alt=""
         />
         <span class="game-seat__label">
-          <span class="game-seat__name">{{ seat.player.name }}</span>
+          <OverflowMarquee class="game-seat__name" :text="seat.player.name" />
           <span v-if="isSheriff(seat.player)" class="game-seat__role">
             Шериф
           </span>
@@ -203,6 +204,19 @@ onBeforeUnmount(() => {
     rgba(240, 160, 32, 0.06) 62deg,
     transparent 76deg 360deg
   );
+}
+
+.game-players-table__turn-light::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  backdrop-filter: blur(20px);
+  transform: translate(-50%, -50%);
+  filter: blur(8px);
 }
 
 .game-players-table__label {
@@ -265,6 +279,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
+  backdrop-filter: blur(5px);
 }
 
 .game-seat__statuses::before {
@@ -279,12 +294,12 @@ onBeforeUnmount(() => {
 
 .game-seat_own .game-seat__statuses {
   --status-ring-color: var(--ink);
-  --status-ring-width: 2px;
+  --status-ring-width: 1px;
 }
 
 .game-seat_turn .game-seat__statuses {
   --status-ring-color: var(--gold);
-  --status-ring-width: 2px;
+  --status-ring-width: 1px;
 }
 
 .game-seat_turn .game-seat__statuses::before {
@@ -324,6 +339,7 @@ onBeforeUnmount(() => {
   border: 1px solid #5e5446;
   border-radius: 50%;
   transform: translate(-50%, -50%);
+  backdrop-filter: blur(10px);
 }
 
 .game-seat__range::before,
@@ -443,14 +459,20 @@ onBeforeUnmount(() => {
   justify-items: center;
   gap: 1px;
   min-width: 0;
+  width: 100%;
 }
 
 .game-seat__role,
 .game-seat__name {
   line-height: 1;
-  white-space: nowrap;
   font-size: 16px;
   font-weight: 500;
+}
+
+.game-seat__name {
+  width: 100%;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .game-seat__role {

@@ -17,4 +17,11 @@
 .app-screen > * {
   min-width: 0;
 }
+
+@media (width >=600px) {
+  .app-screen {
+    border-left: 1px dashed var(--line);
+    border-right: 1px dashed var(--line);
+  }
+}
 </style>

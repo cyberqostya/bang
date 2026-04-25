@@ -1,6 +1,6 @@
 # Deploy на одном VDS
 
-Ниже план для `Ubuntu 24.04`, домена `cyberqostya.ru`, одного сервера с:
+Ниже план для `Ubuntu 24.04`, поддомена `bang.cyberqostya.ru`, одного сервера с:
 - `nginx` для статики и reverse proxy
 - `pm2` для автоподнятия backend
 - `certbot` для SSL
@@ -9,9 +9,9 @@
 
 - фронт: раздается `nginx` из `dist`
 - backend: Node WebSocket сервер на `127.0.0.1:3001`
-- домен:
-  - `https://cyberqostya.ru`
-  - `wss://cyberqostya.ru/game-ws`
+- адрес:
+  - `https://bang.cyberqostya.ru`
+  - `wss://bang.cyberqostya.ru/game-ws`
 - рестарт после падения: `pm2`
 - логи:
   - обычные успешные логи не пишем в файл
@@ -21,8 +21,7 @@
 
 У регистратора домена создай записи:
 
-- `A` -> `cyberqostya.ru` -> `IP_сервера`
-- `A` -> `www.cyberqostya.ru` -> `IP_сервера`
+- `A` -> `bang.cyberqostya.ru` -> `IP_сервера`
 
 Подожди, пока домен начнет резолвиться.
 
@@ -92,7 +91,7 @@ pm2 logs bang-server --err --lines 100
 Создай файл:
 
 ```bash
-sudo nano /etc/nginx/sites-available/cyberqostya.ru
+sudo nano /etc/nginx/sites-available/bang.cyberqostya.ru
 ```
 
 Вставь:
@@ -101,7 +100,7 @@ sudo nano /etc/nginx/sites-available/cyberqostya.ru
 server {
     listen 80;
     listen [::]:80;
-    server_name cyberqostya.ru www.cyberqostya.ru;
+    server_name bang.cyberqostya.ru;
 
     root /var/www/bang/current/dist;
     index index.html;
@@ -134,7 +133,7 @@ server {
 Включи сайт:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/cyberqostya.ru /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/bang.cyberqostya.ru /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -144,7 +143,7 @@ sudo systemctl reload nginx
 Когда DNS уже смотрит на сервер:
 
 ```bash
-sudo certbot --nginx -d cyberqostya.ru -d www.cyberqostya.ru
+sudo certbot --nginx -d bang.cyberqostya.ru
 ```
 
 Проверка автообновления:

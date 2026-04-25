@@ -2108,7 +2108,7 @@ export function startGameServer() {
   ) {
     const ability = characterConfig[player?.characterId]?.ability;
 
-    if (!player?.isAlive || ability?.trigger !== "passive") {
+    if (!player?.isAlive || player.health <= 0 || ability?.trigger !== "passive") {
       return false;
     }
 

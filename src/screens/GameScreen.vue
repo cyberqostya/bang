@@ -445,6 +445,10 @@ watch(
       return;
     }
 
+    viewMode.value = "players";
+    inspectedPlayerId.value = "";
+    roomStore.cancelSelectedCard();
+    roomStore.cancelDrawTargetSelection();
     clearTurnCheckNotice();
   },
 );

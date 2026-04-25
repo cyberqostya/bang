@@ -2,12 +2,14 @@
 import { computed, ref, watch } from "vue";
 import { cardConfig } from "../../shared/cardConfig.js";
 import { characterConfig } from "../../shared/characterConfig.js";
+import { createDeck } from "../../server/cards.js";
 import AppButton from "../components/AppButton.vue";
 import AppInput from "../components/AppInput.vue";
 import CardPreview from "../components/CardPreview.vue";
 import GameCardButton from "../components/GameCardButton.vue";
 import { useAppHeader } from "../composables/useAppHeader.js";
 import { navigateBack, navigateTo } from "../utils/navigation.js";
+import { resolveAssetUrl } from "../utils/assets.js";
 
 const props = defineProps({
   selectedCardId: {
@@ -28,8 +30,19 @@ const characterCards = Object.values(characterConfig).map((character) => ({
   cardId: character.id,
   instanceId: `character-${character.id}`,
 }));
+const deckCardsByCardId = createDeck().reduce((map, deckCard) => {
+  const cards = map.get(deckCard.cardId) || [];
+
+  cards.push(deckCard);
+  map.set(deckCard.cardId, cards);
+
+  return map;
+}, new Map());
 
 const allCatalogCards = computed(() => [...gameCards, ...characterCards]);
+const previewDeckCards = computed(() =>
+  previewCard.value ? deckCardsByCardId.get(previewCard.value.id) || [] : [],
+);
 const filteredGameCards = computed(() => {
   const query = search.value.trim().toLowerCase();
 
@@ -141,7 +154,43 @@ useAppHeader(
       </div>
     </section>
 
-    <CardPreview v-if="previewCard" :card="previewCard" @close="closePreview" />
+    <CardPreview
+      v-if="previewCard"
+      :card="previewCard"
+      :has-details="previewDeckCards.length > 0"
+      @close="closePreview"
+    >
+      <template v-if="previewDeckCards.length">
+        <p class="card-preview-details__line">
+          Карт в колоде: {{ previewDeckCards.length }}
+        </p>
+        <div class="card-preview-details__line">
+          <span>Карты:</span>
+          <span class="card-preview-details__cards">
+            <span
+              v-for="deckCard in previewDeckCards"
+              :key="deckCard.instanceId"
+              class="card-preview-details__chip"
+            >
+              <span :style="{ color: deckCard.suit.color }">
+                {{ deckCard.rank.label }}
+              </span>
+              <img
+                :src="resolveAssetUrl(deckCard.suit.image)"
+                :alt="deckCard.suit.label"
+              />
+              <span
+                v-if="deckCard !== previewDeckCards.at(-1)"
+                class="card-preview-details__comma"
+                aria-hidden="true"
+              >
+                ,
+              </span>
+            </span>
+          </span>
+        </div>
+      </template>
+    </CardPreview>
   </div>
 </template>
 
@@ -205,5 +254,33 @@ useAppHeader(
   justify-items: center;
   gap: 10px 6px;
   min-width: 0;
+}
+
+.card-preview-details__line {
+  margin: 0;
+  line-height: 1.3;
+}
+
+.card-preview-details__cards {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 6px;
+}
+
+.card-preview-details__chip {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.card-preview-details__chip img {
+  width: 12px;
+  height: 12px;
+  object-fit: contain;
+}
+
+.card-preview-details__comma {
+  color: var(--muted);
 }
 </style>

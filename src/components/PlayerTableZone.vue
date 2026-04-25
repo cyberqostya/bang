@@ -53,8 +53,8 @@ const weaponSlotProps = computed(() => {
   <PlayZone title="Планшет игрока" variant="table">
     <div class="table-main">
       <slot name="lead" />
-      <CharacterSlot :character="character" />
       <div class="table-cards">
+        <CharacterSlot :character="character" />
         <WeaponSlot
           v-bind="weaponSlotProps"
           @activate="emit('take-weapon', $event)"
@@ -73,7 +73,7 @@ const weaponSlotProps = computed(() => {
 .table-main {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 10px;
   min-width: 0;
   padding: 15px 5px;
